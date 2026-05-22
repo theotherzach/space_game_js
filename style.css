@@ -113,3 +113,99 @@ body {
 #banner.hidden { display: none; }
 #banner.win { border-color: var(--good); color: var(--good); }
 #banner.lose { border-color: var(--warn); color: var(--warn); }
+
+/* tech tree */
+#tech-panel {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 3, 10, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+#tech-panel.hidden { display: none; }
+#tech-panel-inner {
+  background: #0a1023;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  width: 720px;
+  max-width: 94vw;
+  padding: 16px 22px 18px;
+  box-shadow: 0 12px 60px rgba(0, 0, 0, 0.6);
+}
+#tech-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--panel-border);
+  padding-bottom: 8px;
+  margin-bottom: 14px;
+}
+#tech-header h2 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+#tech-close {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  font-size: 18px;
+  width: 28px; height: 28px;
+  cursor: pointer;
+  line-height: 1;
+}
+#tech-close:hover { color: var(--warn); border-color: var(--warn); }
+#tech-tree {
+  display: flex;
+  gap: 22px;
+  justify-content: space-between;
+}
+.tech-branch {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.tech-branch h3 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+.tech-line {
+  width: 2px;
+  height: 14px;
+  background: var(--panel-border);
+  margin: 0 auto;
+}
+.tech-node {
+  background: #131b2e;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+.tech-node .tn-name { font-weight: 600; }
+.tech-node .tn-effect { color: var(--muted); font-size: 11.5px; line-height: 1.3; }
+.tech-node .tn-cost { color: var(--gold); font-size: 11px; }
+.tech-node.available { border-color: var(--accent); }
+.tech-node.available:hover { background: #18253f; box-shadow: 0 0 12px rgba(111, 209, 255, 0.25); }
+.tech-node.expensive { border-color: var(--gold); cursor: not-allowed; }
+.tech-node.expensive .tn-cost { color: var(--warn); }
+.tech-node.locked { opacity: 0.5; cursor: not-allowed; }
+.tech-node.owned { border-color: var(--good); background: #102018; }
+.tech-node.owned .tn-cost { color: var(--good); }
+#tech-footer { color: var(--muted); font-size: 11px; margin-top: 14px; text-align: center; }

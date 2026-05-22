@@ -5,18 +5,57 @@ const W = 1024;
 const H = 640;
 
 const COSTS = { connector: 15, miner: 40, turret: 60 };
-const CONNECT_RANGE = 170;     // building-to-building network range
-const MINE_RANGE = 110;        // miner-to-mineral pickup range
-const TURRET_RANGE = 180;
-const TURRET_DAMAGE = 12;
-const TURRET_FIRE_INTERVAL = 0.55; // seconds
-const MINER_RATE = 8;          // minerals/sec from one miner on a node
+
+// Base values — research multiplies these. See computeTech() below.
+const BASE_TECH = Object.freeze({
+  minerRate: 8,                 // minerals/sec per miner
+  mineRange: 110,               // miner pickup radius
+  connectRange: 170,            // building-to-building network range
+  turretRange: 180,
+  turretFireInterval: 0.55,     // seconds between shots
+  turretDamage: 12,
+  hpMult: 1.0,                  // multiplier on all building maxHp
+  repairRate: 0,                // hp/sec passively regenerated on networked buildings
+});
+
 const BASE_HP = 200;
 const TURRET_HP = 60;
 const MINER_HP = 35;
 const CONNECTOR_HP = 25;
 const STARTING_MINERALS = 60;
 const GOAL = 1500;
+
+// ---------- tech tree ----------
+// Three branches × three tiers. Linear dependencies within each branch.
+const TECH_TREE = [
+  // economy
+  { id: "mining_i",    name: "Mining I",    branch: 0, tier: 0, cost: 80,  prereq: null,         summary: "+30% miner rate" },
+  { id: "mining_ii",   name: "Mining II",   branch: 0, tier: 1, cost: 200, prereq: "mining_i",   summary: "+30% miner rate (stacks)" },
+  { id: "hyperdrill",  name: "Hyper Drill", branch: 0, tier: 2, cost: 350, prereq: "mining_ii",  summary: "+75% mine range, +20% rate" },
+  // network
+  { id: "network_i",   name: "Network I",   branch: 1, tier: 0, cost: 80,  prereq: null,         summary: "+20% connector range" },
+  { id: "network_ii",  name: "Network II",  branch: 1, tier: 1, cost: 200, prereq: "network_i",  summary: "+20% range (stacks)" },
+  { id: "power_grid",  name: "Power Grid",  branch: 1, tier: 2, cost: 400, prereq: "network_ii", summary: "+25% turret damage" },
+  // defense
+  { id: "armor_i",     name: "Armor I",     branch: 2, tier: 0, cost: 100, prereq: null,         summary: "+25% building HP" },
+  { id: "armor_ii",    name: "Armor II",    branch: 2, tier: 1, cost: 250, prereq: "armor_i",    summary: "+25% HP, +1 HP/s repair" },
+  { id: "rapid_fire",  name: "Rapid Fire",  branch: 2, tier: 2, cost: 300, prereq: "armor_ii",   summary: "+60% turret fire rate" },
+];
+const TECH_BY_ID = Object.fromEntries(TECH_TREE.map(t => [t.id, t]));
+
+function computeTech(researched) {
+  const t = { ...BASE_TECH };
+  if (researched.has("mining_i"))   t.minerRate *= 1.3;
+  if (researched.has("mining_ii"))  t.minerRate *= 1.3;
+  if (researched.has("hyperdrill")) { t.minerRate *= 1.2; t.mineRange *= 1.75; }
+  if (researched.has("network_i"))  t.connectRange *= 1.2;
+  if (researched.has("network_ii")) t.connectRange *= 1.2;
+  if (researched.has("power_grid")) t.turretDamage *= 1.25;
+  if (researched.has("armor_i"))    t.hpMult *= 1.25;
+  if (researched.has("armor_ii"))   { t.hpMult *= 1.25; t.repairRate = 1; }
+  if (researched.has("rapid_fire")) t.turretFireInterval *= 0.625;
+  return t;
+}
 
 // ---------- utility ----------
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -38,13 +77,19 @@ class Entity {
     this.id = nextId++;
     this.x = x;
     this.y = y;
-    this.hp = hp;
+    this.baseMaxHp = hp;
     this.maxHp = hp;
+    this.hp = hp;
     this.dead = false;
   }
   damage(dmg) {
     this.hp -= dmg;
     if (this.hp <= 0) this.dead = true;
+  }
+  applyHpMult(mult) {
+    const ratio = this.maxHp > 0 ? this.hp / this.maxHp : 1;
+    this.maxHp = this.baseMaxHp * mult;
+    this.hp = this.maxHp * ratio;
   }
 }
 
@@ -83,17 +128,18 @@ class Miner extends Entity {
   }
   update(dt, game) {
     if (!this.networked) return;
-    if (!this.target || this.target.dead || dist(this, this.target) > MINE_RANGE) {
+    const range = game.tech.mineRange;
+    if (!this.target || this.target.dead || dist(this, this.target) > range) {
       this.target = null;
       let best = Infinity;
       for (const m of game.minerals) {
         if (m.dead) continue;
         const d = dist(this, m);
-        if (d < MINE_RANGE && d < best) { best = d; this.target = m; }
+        if (d < range && d < best) { best = d; this.target = m; }
       }
     }
     if (this.target) {
-      const amt = MINER_RATE * dt;
+      const amt = game.tech.minerRate * dt;
       const taken = this.target.extract(amt);
       game.minerals_collected += taken;
       game.recent_mined += taken;
@@ -128,17 +174,18 @@ class Turret extends Entity {
   update(dt, game) {
     if (!this.networked) return;
     this.cooldown -= dt;
+    const range = game.tech.turretRange;
     // find nearest enemy in range
     let target = null, best = Infinity;
     for (const e of game.enemies) {
       const d = dist(this, e);
-      if (d < TURRET_RANGE && d < best) { target = e; best = d; }
+      if (d < range && d < best) { target = e; best = d; }
     }
     if (target) {
       this.aimAngle = Math.atan2(target.y - this.y, target.x - this.x);
       if (this.cooldown <= 0) {
-        game.bullets.push(new Bullet(this.x, this.y, target));
-        this.cooldown = TURRET_FIRE_INTERVAL;
+        game.bullets.push(new Bullet(this.x, this.y, target, game.tech.turretDamage));
+        this.cooldown = game.tech.turretFireInterval;
       }
     }
   }
@@ -240,9 +287,10 @@ class Enemy extends Entity {
 }
 
 class Bullet {
-  constructor(x, y, target) {
+  constructor(x, y, target, damage) {
     this.x = x; this.y = y;
     this.target = target;
+    this.damage = damage;
     this.speed = 520;
     this.dead = false;
   }
@@ -250,7 +298,7 @@ class Bullet {
     if (this.target.dead) { this.dead = true; return; }
     const d = dist(this, this.target);
     if (d < 6) {
-      this.target.damage(TURRET_DAMAGE);
+      this.target.damage(this.damage);
       this.dead = true;
       return;
     }
@@ -311,8 +359,15 @@ class Game {
     canvas.addEventListener("contextmenu", e => { e.preventDefault(); this.placement = null; this.refreshBuildUI(); });
 
     document.addEventListener("keydown", e => {
-      if (e.key === "Escape") { this.placement = null; this.refreshBuildUI(); }
+      if (e.key === "Escape") {
+        if (!document.getElementById("tech-panel").classList.contains("hidden")) {
+          this.toggleTechPanel(false);
+        } else {
+          this.placement = null; this.refreshBuildUI();
+        }
+      }
       if (e.key === " ") { this.speed = this.speed === 0 ? 1 : 0; this.refreshSpeedUI(); }
+      if (e.key === "r" || e.key === "R") this.toggleTechPanel();
     });
 
     for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
@@ -322,6 +377,8 @@ class Game {
       });
     }
     document.getElementById("restart").addEventListener("click", () => this.reset());
+    document.getElementById("research").addEventListener("click", () => this.toggleTechPanel());
+    document.getElementById("tech-close").addEventListener("click", () => this.toggleTechPanel(false));
 
     for (const btn of document.querySelectorAll("#build button[data-build]")) {
       btn.addEventListener("click", () => {
@@ -337,6 +394,8 @@ class Game {
 
   reset() {
     nextId = 1;
+    this.researched = new Set();
+    this.tech = computeTech(this.researched);
     this.base = new Base(W / 2, H / 2);
     this.buildings = [this.base];          // base + connectors + miners + turrets
     this.minerals = this.spawnMinerals();
@@ -353,7 +412,31 @@ class Game {
     this.over = null;                       // "win" | "lose" | null
     this.refreshBuildUI();
     this.refreshSpeedUI();
+    this.renderTechTree();
     this.hideBanner();
+  }
+
+  // ---- research ----
+  canResearch(id) {
+    const node = TECH_BY_ID[id];
+    if (!node) return false;
+    if (this.researched.has(id)) return false;
+    if (node.prereq && !this.researched.has(node.prereq)) return false;
+    return this.minerals_stored >= node.cost;
+  }
+  research(id) {
+    if (!this.canResearch(id)) return false;
+    const node = TECH_BY_ID[id];
+    this.minerals_stored -= node.cost;
+    this.researched.add(id);
+    const newTech = computeTech(this.researched);
+    if (newTech.hpMult !== this.tech.hpMult) {
+      for (const b of this.buildings) b.applyHpMult(newTech.hpMult);
+    }
+    this.tech = newTech;
+    this.recomputeNetwork();
+    this.renderTechTree();
+    return true;
   }
 
   spawnMinerals() {
@@ -399,6 +482,7 @@ class Game {
     else if (kind === "miner") b = new Miner(x, y);
     else if (kind === "turret") b = new Turret(x, y);
     if (!b) return;
+    if (this.tech.hpMult !== 1) b.applyHpMult(this.tech.hpMult);
     this.minerals_stored -= cost;
     this.buildings.push(b);
     this.recomputeNetwork();
@@ -406,7 +490,7 @@ class Game {
   }
 
   recomputeNetwork() {
-    // BFS from base; a building is networked if reachable via building-to-building <= CONNECT_RANGE
+    // BFS from base; a building is networked if reachable via building-to-building <= this.tech.connectRange
     for (const b of this.buildings) b.networked = false;
     this.base.networked = true;
     const q = [this.base];
@@ -414,7 +498,7 @@ class Game {
       const cur = q.shift();
       for (const other of this.buildings) {
         if (other.networked || other.dead) continue;
-        if (dist(cur, other) <= CONNECT_RANGE) { other.networked = true; q.push(other); }
+        if (dist(cur, other) <= this.tech.connectRange) { other.networked = true; q.push(other); }
       }
     }
   }
@@ -453,6 +537,15 @@ class Game {
 
     // building updates
     for (const b of this.buildings) if (b.update) b.update(dt, this);
+
+    // passive auto-repair on networked buildings (unlocked by Armor II)
+    if (this.tech.repairRate > 0) {
+      const heal = this.tech.repairRate * dt;
+      for (const b of this.buildings) {
+        if (!b.networked || b.dead) continue;
+        if (b.hp < b.maxHp) b.hp = Math.min(b.maxHp, b.hp + heal);
+      }
+    }
 
     // bullets
     for (const b of this.bullets) b.update(dt);
@@ -515,7 +608,7 @@ class Game {
       for (let j = i + 1; j < this.buildings.length; j++) {
         const b = this.buildings[j];
         if (b.dead) continue;
-        if (dist(a, b) <= CONNECT_RANGE) {
+        if (dist(a, b) <= this.tech.connectRange) {
           const lit = a.networked && b.networked;
           ctx.strokeStyle = lit ? "rgba(111, 209, 255, 0.45)" : "rgba(80, 100, 150, 0.18)";
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
@@ -562,13 +655,13 @@ class Game {
     ctx.setLineDash([4, 4]);
     if (kind === "connector") {
       ctx.strokeStyle = "rgba(111, 209, 255, 0.25)";
-      ctx.beginPath(); ctx.arc(x, y, CONNECT_RANGE, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, this.tech.connectRange, 0, Math.PI * 2); ctx.stroke();
     } else if (kind === "miner") {
       ctx.strokeStyle = "rgba(240, 193, 75, 0.3)";
-      ctx.beginPath(); ctx.arc(x, y, MINE_RANGE, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, this.tech.mineRange, 0, Math.PI * 2); ctx.stroke();
     } else if (kind === "turret") {
       ctx.strokeStyle = "rgba(255, 116, 102, 0.3)";
-      ctx.beginPath(); ctx.arc(x, y, TURRET_RANGE, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, this.tech.turretRange, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.setLineDash([]);
   }
@@ -612,6 +705,76 @@ class Game {
   }
   hideBanner() {
     document.getElementById("banner").classList.add("hidden");
+  }
+
+  toggleTechPanel(force) {
+    const panel = document.getElementById("tech-panel");
+    const showing = force === undefined ? panel.classList.contains("hidden") : force;
+    panel.classList.toggle("hidden", !showing);
+    if (showing) {
+      this.prevSpeed = this.speed;
+      this.speed = 0;
+      this.refreshSpeedUI();
+      this.renderTechTree();
+    } else if (this.prevSpeed !== undefined) {
+      this.speed = this.prevSpeed;
+      this.refreshSpeedUI();
+    }
+  }
+
+  renderTechTree() {
+    const root = document.getElementById("tech-tree");
+    if (!root) return;
+    // group by branch
+    const branches = [[], [], []];
+    for (const node of TECH_TREE) branches[node.branch].push(node);
+    for (const b of branches) b.sort((a, c) => a.tier - c.tier);
+
+    root.innerHTML = "";
+    const branchTitles = ["Economy", "Network", "Defense"];
+    branches.forEach((nodes, i) => {
+      const col = document.createElement("div");
+      col.className = "tech-branch";
+      const h = document.createElement("h3");
+      h.textContent = branchTitles[i];
+      col.appendChild(h);
+      nodes.forEach((node, idx) => {
+        if (idx > 0) {
+          const line = document.createElement("div");
+          line.className = "tech-line";
+          col.appendChild(line);
+        }
+        const card = document.createElement("button");
+        card.className = "tech-node";
+        const owned = this.researched.has(node.id);
+        const prereqMet = !node.prereq || this.researched.has(node.prereq);
+        const affordable = this.minerals_stored >= node.cost;
+        if (owned) card.classList.add("owned");
+        else if (!prereqMet) card.classList.add("locked");
+        else if (affordable) card.classList.add("available");
+        else card.classList.add("expensive");
+
+        card.innerHTML = `
+          <span class="tn-name">${node.name}</span>
+          <span class="tn-effect">${node.summary}</span>
+          <span class="tn-cost">${owned ? "Researched" : `${node.cost} min.`}</span>
+        `;
+        if (!owned && prereqMet) {
+          card.addEventListener("click", () => {
+            if (this.research(node.id)) {
+              this.refreshHud();
+            } else {
+              card.animate(
+                [{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" }],
+                { duration: 150 }
+              );
+            }
+          });
+        }
+        col.appendChild(card);
+      });
+      root.appendChild(col);
+    });
   }
 }
 
