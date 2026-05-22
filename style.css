@@ -1,0 +1,115 @@
+:root {
+  --bg: #06070d;
+  --panel: rgba(12, 18, 32, 0.92);
+  --panel-border: #1d2940;
+  --text: #d6e0f0;
+  --muted: #7c8aa6;
+  --accent: #6fd1ff;
+  --warn: #ff7466;
+  --good: #6bd96b;
+  --gold: #f0c14b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 8px;
+}
+
+#hud {
+  width: 1024px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+
+#status .sep { color: var(--muted); margin: 0 8px; }
+#status span:not(.sep) { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+#speeds button, #build button {
+  background: #131b2e;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  margin-left: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#speeds button.active { background: var(--accent); color: #06070d; border-color: var(--accent); }
+#speeds button:hover, #build button:hover { border-color: var(--accent); }
+
+#game {
+  display: block;
+  background: #02030a;
+  border: 1px solid var(--panel-border);
+  cursor: crosshair;
+}
+
+#build {
+  width: 1024px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+}
+
+#build button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-left: 0;
+  padding: 6px 10px;
+  min-width: 88px;
+}
+#build button b { color: var(--text); font-weight: 600; }
+#build button .cost { color: var(--gold); font-size: 11px; }
+#build button.cancel { color: var(--warn); }
+#build button.active { background: var(--accent); color: #06070d; border-color: var(--accent); }
+#build button.active b, #build button.active .cost { color: #06070d; }
+#build button.disabled { opacity: 0.4; cursor: not-allowed; }
+
+#hint { color: var(--muted); margin-left: auto; font-size: 12px; }
+
+#banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(2, 3, 10, 0.92);
+  border: 1px solid var(--accent);
+  padding: 20px 40px;
+  font-size: 28px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text);
+  border-radius: 4px;
+}
+#banner.hidden { display: none; }
+#banner.win { border-color: var(--good); color: var(--good); }
+#banner.lose { border-color: var(--warn); color: var(--warn); }

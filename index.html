@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The Space Game (JS)</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="hud">
+  <div id="status">
+    <span id="minerals">0</span> minerals
+    <span class="sep">·</span>
+    <span id="rate">0</span>/min
+    <span class="sep">·</span>
+    <span id="energy">0</span>/<span id="energy-max">0</span> energy
+    <span class="sep">·</span>
+    Mission <span id="mission">1</span>
+    <span class="sep">·</span>
+    <span id="clock">00:00</span>
+    <span class="sep">·</span>
+    Goal: <span id="goal">0</span>
+  </div>
+  <div id="speeds">
+    <button data-speed="0">Pause</button>
+    <button data-speed="0.5">Slow</button>
+    <button data-speed="1" class="active">Normal</button>
+    <button data-speed="3">Fast</button>
+    <button id="restart">Restart</button>
+  </div>
+</div>
+
+<canvas id="game" width="1024" height="640"></canvas>
+
+<div id="build">
+  <button data-build="connector"><b>Connector</b><span class="cost">15</span></button>
+  <button data-build="miner"><b>Miner</b><span class="cost">40</span></button>
+  <button data-build="turret"><b>Turret</b><span class="cost">60</span></button>
+  <button data-build="cancel" class="cancel">Cancel</button>
+  <span id="hint">Click a building to start placing. Then click on the map.</span>
+</div>
+
+<div id="banner" class="hidden"><span id="banner-text"></span></div>
+
+<script src="game.js"></script>
+</body>
+</html>
