@@ -4,7 +4,26 @@ Running log of changes. Newest at the top. Survives context resets.
 
 ## 2026-05-22
 
-### Session 1 — initial build + tech tree + gameplay batch
+### Session 1, batch 4 — audio + tank + approach markers + skip wave
+
+- **Audio**: `Sfx` object backed by Web Audio API. Pure oscillator+gain envelopes,
+  no asset files. AudioContext initializes on first pointer-down. Hooks:
+  shoot, hit, death, build, sell, wave, win, lose, research. Mute button (🔊/🔇)
+  and `M` key toggle.
+- **Tank enemy**: square sprite with armor X. Slow, very high HP/damage, drops
+  20 minerals. Spawns from wave 3, scales 1 per 2 waves.
+- **Wave preview system**: `prepareWaveSpec()` runs on reset and after each
+  `spawnWave()`, computing the next wave's enemy composition and pre-rolled
+  edge spawn positions. `drawApproachMarkers()` paints pulsing triangles at
+  those positions in the last 3s of the countdown so you can read where the
+  threat is coming from.
+- **Skip-wave button**: "Send wave" in the HUD bar plus W shortcut. Only fires
+  between waves. Sets `next_wave = time + 0.5` so the existing wave loop picks
+  it up cleanly.
+
+### Session 1, batch 3 — sell + particles + flashes + scout
+### Session 1, batch 2 — tech tree
+### Session 1, batch 1 — initial build
 
 **Initial commit (`7e23554`)** — vanilla HTML/Canvas scaffold:
 - `index.html`, `style.css`, `game.js`, `README.md`, `.gitignore`

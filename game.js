@@ -58,6 +58,49 @@ function computeTech(researched) {
   return t;
 }
 
+// ---------- audio ----------
+const SOUNDS = {
+  shoot:  { type: "square",   f0: 800, f1: 220, d: 0.06, v: 0.05 },
+  hit:    { type: "sawtooth", f0: 420, f1: 80,  d: 0.07, v: 0.07 },
+  death:  { type: "sawtooth", f0: 280, f1: 50,  d: 0.22, v: 0.12 },
+  build:  { type: "triangle", f0: 320, f1: 540, d: 0.10, v: 0.10 },
+  sell:   { type: "triangle", f0: 540, f1: 220, d: 0.10, v: 0.09 },
+  wave:   { type: "sawtooth", f0: 140, f1: 80,  d: 0.50, v: 0.12 },
+  win:    { type: "sine",     f0: 600, f1: 900, d: 0.50, v: 0.18 },
+  lose:   { type: "sawtooth", f0: 200, f1: 50,  d: 0.80, v: 0.18 },
+  click:  { type: "square",   f0: 700, f1: 700, d: 0.03, v: 0.04 },
+  research:{type: "triangle", f0: 440, f1: 880, d: 0.18, v: 0.12 },
+};
+const Sfx = {
+  ctx: null,
+  enabled: true,
+  init() {
+    if (this.ctx) return;
+    try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { /* no audio */ }
+  },
+  resume() { if (this.ctx && this.ctx.state === "suspended") this.ctx.resume(); },
+  play(name) {
+    if (!this.enabled || !this.ctx) return;
+    const cfg = SOUNDS[name];
+    if (!cfg) return;
+    const c = this.ctx;
+    const t = c.currentTime;
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = cfg.type;
+    o.frequency.setValueAtTime(cfg.f0, t);
+    if (cfg.f1 && cfg.f1 !== cfg.f0) o.frequency.exponentialRampToValueAtTime(cfg.f1, t + cfg.d);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(cfg.v, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + cfg.d);
+    o.connect(g); g.connect(c.destination);
+    o.start(t);
+    o.stop(t + cfg.d + 0.02);
+  },
+  setEnabled(on) { this.enabled = on; },
+};
+
 // ---------- utility ----------
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -192,6 +235,7 @@ class Turret extends Entity {
       if (this.cooldown <= 0) {
         game.bullets.push(new Bullet(this.x, this.y, target, game.tech.turretDamage));
         this.cooldown = game.tech.turretFireInterval;
+        Sfx.play("shoot");
       }
     }
   }
@@ -240,8 +284,8 @@ class Mineral extends Entity {
 class Enemy extends Entity {
   constructor(x, y, hp, speed, damage, value, kind = "raider") {
     super(x, y, hp);
-    this.radius = kind === "scout" ? 5 : 7;
-    this.kind = kind;            // "raider" (default) or "scout"
+    this.radius = kind === "scout" ? 5 : kind === "tank" ? 11 : 7;
+    this.kind = kind;            // "raider" | "scout" | "tank"
     this.speed = speed;
     this.attackDamage = damage;  // NOT `damage` — that would shadow Entity.damage()
     this.value = value;
@@ -279,23 +323,43 @@ class Enemy extends Entity {
     if (this.kind === "scout") {
       ctx.fillStyle = "#5a2a8a";
       ctx.strokeStyle = "#c884ff";
+    } else if (this.kind === "tank") {
+      ctx.fillStyle = "#451010";
+      ctx.strokeStyle = "#9a2222";
     } else {
       ctx.fillStyle = "#7a1818";
       ctx.strokeStyle = "#ff5d4d";
     }
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    const sides = this.kind === "scout" ? 3 : 6;
-    for (let i = 0; i < sides; i++) {
-      const a = (i / sides) * Math.PI * 2 - Math.PI / 2;
-      const px = this.x + Math.cos(a) * this.radius;
-      const py = this.y + Math.sin(a) * this.radius;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    if (this.kind === "tank") {
+      // armored block
+      const r = this.radius;
+      ctx.beginPath();
+      ctx.rect(this.x - r, this.y - r, r * 2, r * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = "#9a2222";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(this.x - r * 0.5, this.y - r * 0.5);
+      ctx.lineTo(this.x + r * 0.5, this.y + r * 0.5);
+      ctx.moveTo(this.x + r * 0.5, this.y - r * 0.5);
+      ctx.lineTo(this.x - r * 0.5, this.y + r * 0.5);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      const sides = this.kind === "scout" ? 3 : 6;
+      for (let i = 0; i < sides; i++) {
+        const a = (i / sides) * Math.PI * 2 - Math.PI / 2;
+        const px = this.x + Math.cos(a) * this.radius;
+        const py = this.y + Math.sin(a) * this.radius;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
     }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    drawHpBar(ctx, this, this.kind === "scout" ? 9 : 11);
+    drawHpBar(ctx, this, this.kind === "scout" ? 9 : this.kind === "tank" ? 18 : 11);
   }
 }
 
@@ -354,6 +418,7 @@ class Bullet {
     const d = dist(this, this.target);
     if (d < 6) {
       this.target.damage(this.damage);
+      Sfx.play("hit");
       this.dead = true;
       return;
     }
@@ -423,6 +488,11 @@ class Game {
       }
       if (e.key === " ") { this.speed = this.speed === 0 ? 1 : 0; this.refreshSpeedUI(); }
       if (e.key === "r" || e.key === "R") this.toggleTechPanel();
+      if (e.key === "w" || e.key === "W") this.skipToNextWave();
+      if (e.key === "m" || e.key === "M") {
+        Sfx.setEnabled(!Sfx.enabled);
+        const mb = document.getElementById("mute"); if (mb) mb.textContent = Sfx.enabled ? "🔊" : "🔇";
+      }
     });
 
     for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
@@ -434,6 +504,15 @@ class Game {
     document.getElementById("restart").addEventListener("click", () => this.reset());
     document.getElementById("research").addEventListener("click", () => this.toggleTechPanel());
     document.getElementById("tech-close").addEventListener("click", () => this.toggleTechPanel(false));
+    document.getElementById("send-wave").addEventListener("click", () => this.skipToNextWave());
+    document.getElementById("mute").addEventListener("click", () => {
+      Sfx.setEnabled(!Sfx.enabled);
+      document.getElementById("mute").textContent = Sfx.enabled ? "🔊" : "🔇";
+    });
+    // initialize audio on the first user interaction
+    const ensureAudio = () => { Sfx.init(); Sfx.resume(); };
+    canvas.addEventListener("pointerdown", ensureAudio, { once: true });
+    document.body.addEventListener("pointerdown", ensureAudio, { once: true });
 
     for (const btn of document.querySelectorAll("#build button[data-build]")) {
       btn.addEventListener("click", () => {
@@ -465,6 +544,8 @@ class Game {
     this.speed = 1;
     this.next_wave = 22;                    // first wave at ~22s in
     this.wave_number = 0;
+    this.upcomingWave = null;
+    this.prepareWaveSpec();                 // seed the very first preview
     this.over = null;                       // "win" | "lose" | null
     this.refreshBuildUI();
     this.refreshSpeedUI();
@@ -492,6 +573,7 @@ class Game {
     this.tech = newTech;
     this.recomputeNetwork();
     this.renderTechTree();
+    Sfx.play("research");
     return true;
   }
 
@@ -541,6 +623,7 @@ class Game {
     this.buildings = this.buildings.filter(b => !b.dead);
     this.recomputeNetwork();
     this.refreshHud();
+    Sfx.play("sell");
   }
 
   tryBuild(x, y) {
@@ -561,6 +644,7 @@ class Game {
     this.buildings.push(b);
     this.recomputeNetwork();
     this.refreshBuildUI();
+    Sfx.play("build");
   }
 
   recomputeNetwork() {
@@ -577,33 +661,56 @@ class Game {
     }
   }
 
-  spawnWave() {
-    this.wave_number += 1;
-    const w = this.wave_number;
+  pickEdgePoint() {
+    const edge = Math.floor(Math.random() * 4);
+    if (edge === 0) return { x: Math.random() * W, y: -10, edge };
+    if (edge === 1) return { x: W + 10, y: Math.random() * H, edge };
+    if (edge === 2) return { x: Math.random() * W, y: H + 10, edge };
+    return { x: -10, y: Math.random() * H, edge };
+  }
+
+  prepareWaveSpec() {
+    const w = this.wave_number + 1;
     const raiders = 2 + w;
-    const scouts = w >= 2 ? Math.floor((w - 1) / 2) + 1 : 0;   // scouts start wave 2
+    const scouts = w >= 2 ? Math.floor((w - 1) / 2) + 1 : 0;
+    const tanks = w >= 3 ? 1 + Math.floor((w - 3) / 2) : 0;
+    const composition = [];
+    for (let i = 0; i < raiders; i++) composition.push("raider");
+    for (let i = 0; i < scouts;  i++) composition.push("scout");
+    for (let i = 0; i < tanks;   i++) composition.push("tank");
+    const positions = composition.map(kind => ({ kind, ...this.pickEdgePoint() }));
+    this.upcomingWave = { w, positions };
+  }
+
+  spawnWave() {
+    if (!this.upcomingWave) this.prepareWaveSpec();
+    const { w, positions } = this.upcomingWave;
+    this.wave_number = w;
     const raiderHp = 18 + w * 8;
     const raiderSpeed = 30 + w * 2;
     const raiderDmg = 4 + w;
     const scoutHp = 8 + w * 3;
     const scoutSpeed = 70 + w * 3;
     const scoutDmg = 2 + Math.floor(w / 2);
-    const pickEdge = () => {
-      const edge = Math.floor(Math.random() * 4);
-      if (edge === 0) return { x: Math.random() * W, y: -10 };
-      if (edge === 1) return { x: W + 10, y: Math.random() * H };
-      if (edge === 2) return { x: Math.random() * W, y: H + 10 };
-      return { x: -10, y: Math.random() * H };
-    };
-    for (let i = 0; i < raiders; i++) {
-      const p = pickEdge();
-      this.enemies.push(new Enemy(p.x, p.y, raiderHp, raiderSpeed, raiderDmg, 6, "raider"));
+    const tankHp = 90 + w * 18;
+    const tankSpeed = 18 + w;
+    const tankDmg = 10 + w * 2;
+    for (const slot of positions) {
+      if (slot.kind === "scout") this.enemies.push(new Enemy(slot.x, slot.y, scoutHp, scoutSpeed, scoutDmg, 3, "scout"));
+      else if (slot.kind === "tank") this.enemies.push(new Enemy(slot.x, slot.y, tankHp, tankSpeed, tankDmg, 20, "tank"));
+      else this.enemies.push(new Enemy(slot.x, slot.y, raiderHp, raiderSpeed, raiderDmg, 6, "raider"));
     }
-    for (let i = 0; i < scouts; i++) {
-      const p = pickEdge();
-      this.enemies.push(new Enemy(p.x, p.y, scoutHp, scoutSpeed, scoutDmg, 3, "scout"));
-    }
+    this.upcomingWave = null;
     this.next_wave = this.time + 20 + w * 4;
+    this.prepareWaveSpec();   // queue the wave AFTER this one for the preview pass
+    Sfx.play("wave");
+  }
+
+  // ---- skip wave button: bring next wave forward ----
+  skipToNextWave() {
+    if (this.over) return;
+    if (this.enemies.length > 0) return;  // only during downtime
+    this.next_wave = this.time + 0.5;
   }
 
   loop(t) {
@@ -655,7 +762,9 @@ class Game {
     for (const e of this.enemies) {
       if (e.dead) {
         this.minerals_stored += e.value;
-        explode(this, e.x, e.y, e.kind === "scout" ? "#c884ff" : "#ff5d4d", 12);
+        const c = e.kind === "scout" ? "#c884ff" : e.kind === "tank" ? "#9a2222" : "#ff5d4d";
+        explode(this, e.x, e.y, c, e.kind === "tank" ? 22 : 12);
+        Sfx.play("death");
       } else alive.push(e);
     }
     this.enemies = alive;
@@ -666,6 +775,7 @@ class Game {
       if (b.dead) {
         const c = b.kind === "turret" ? "#ff7466" : b.kind === "miner" ? "#f0c14b" : "#6fd1ff";
         explode(this, b.x, b.y, c, 16);
+        Sfx.play("death");
       }
     }
     this.buildings = this.buildings.filter(b => !b.dead);
@@ -689,6 +799,7 @@ class Game {
   endGame(state) {
     this.over = state;
     this.showBanner(state === "win" ? "Mission complete" : "Base destroyed", state);
+    Sfx.play(state);
   }
 
   draw() {
@@ -733,14 +844,47 @@ class Game {
     // placement preview
     if (this.placement && this.mouse.in) this.drawPlacementPreview(ctx);
 
-    // wave countdown
+    // wave countdown + approach markers
     if (!this.over && this.enemies.length === 0) {
       const t = Math.max(0, this.next_wave - this.time);
       ctx.fillStyle = "rgba(255, 220, 120, 0.75)";
       ctx.font = "13px monospace";
       ctx.textAlign = "center";
-      ctx.fillText(`Next wave in ${t.toFixed(1)}s`, W / 2, 22);
+      ctx.fillText(`Next wave in ${t.toFixed(1)}s — press W or click "Send wave"`, W / 2, 22);
+      // approach markers in last 3s of countdown
+      if (t <= 3 && this.upcomingWave) {
+        this.drawApproachMarkers(ctx, t);
+      }
     }
+  }
+
+  drawApproachMarkers(ctx, secondsLeft) {
+    const alpha = clamp((3 - secondsLeft) / 3, 0.2, 1);
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 8);
+    for (const slot of this.upcomingWave.positions) {
+      const color = slot.kind === "scout" ? "#c884ff" : slot.kind === "tank" ? "#9a2222" : "#ff5d4d";
+      // clamp marker to the canvas edge
+      const mx = clamp(slot.x, 8, W - 8);
+      const my = clamp(slot.y, 8, H - 8);
+      ctx.globalAlpha = alpha * (0.5 + 0.5 * pulse);
+      ctx.fillStyle = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      // small triangle pointing inward
+      const dx = W / 2 - mx, dy = H / 2 - my;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      const tip = { x: mx + ux * 12, y: my + uy * 12 };
+      const left = { x: mx - uy * 6, y: my + ux * 6 };
+      const right = { x: mx + uy * 6, y: my - ux * 6 };
+      ctx.beginPath();
+      ctx.moveTo(tip.x, tip.y);
+      ctx.lineTo(left.x, left.y);
+      ctx.lineTo(right.x, right.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
 
   drawPlacementPreview(ctx) {
