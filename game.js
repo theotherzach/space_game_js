@@ -35,6 +35,28 @@ const CONSTRUCTION_TICK = 10; // try to add 1 progress every N frames if energy 
 const RELAY_HP = 100;
 const MINER_HP = 300;
 const ENERGY_HP = 600;
+const LASER_HP = 200;
+const ROCKET_HP = 500;
+
+// Laser turret (subType 0 / standard, from buildingLaser.as)
+const LASER_DAMAGE = 30;
+const LASER_RANGE = 90;
+const LASER_FIRE_START = 5;
+const LASER_FIRE_COOLDOWN = 20;
+const LASER_ENERGY_NEEDED = 2;
+
+// Rocket turret (from buildingRocket.as)
+const ROCKET_DAMAGE = 450;
+const ROCKET_SPLASH = 40;
+const ROCKET_RANGE = 400;
+const ROCKET_FIRE_GAP = 200;            // _fireStep set on attack lock
+const ROCKET_MAX_ENERGY = 1;
+const ROCKET_PER_SHOT_COST = 5;         // _root.charge(5) on each launch
+const ROCKET_TRAVEL_SPEED = 6;          // px per tick
+
+// Ship (enemy) baseline — values from ship1.as for fighter; others tune per-class
+const SHIP_FIGHTER_HP = 100;
+const SHIP_FIGHTER_DAMAGE = 8;
 
 // ---------- audio ----------
 const SOUNDS = {
@@ -347,6 +369,299 @@ class Asteroid extends Entity {
   }
 }
 
+// buildingLaser (subType 0 / standard turret).
+// Ports `_fireStart`/`_fireCooldown` cooldown cycle + `_energyNeeded` buffer.
+class LaserTurret extends Building {
+  constructor(x, y) {
+    super(x, y, "laser", LASER_HP, COSTS.laser);
+    this.size = 14;
+    this.fireRange = LASER_RANGE;
+    this.fireStart = LASER_FIRE_START;
+    this.fireCooldown = LASER_FIRE_COOLDOWN;
+    this.fireStep = 0;
+    this.energyNeeded = LASER_ENERGY_NEEDED;
+    this.maxEnergy = this.energyNeeded;  // we keep a small energy buffer
+    this.attackDamage = LASER_DAMAGE;
+    this.attack = null;     // current target ship
+    this.beam = null;       // {tx, ty, life}
+    this.tickStep = 1;
+    this.constructionTick = 15;
+  }
+  tick(game) {
+    if (this.construction < this.constructionTarget) {
+      this.constructionStep += 2;
+      if (this.constructionStep >= this.constructionTick) {
+        this.energy = game.requestEnergy(this, 1);
+        this.constructionStep = 0;
+        if (this.energy > 0) {
+          this.construction += 1;
+          if (this.construction >= this.constructionTarget) this.finishConstruction();
+        }
+      }
+      return;
+    }
+    // standard pulse-laser pattern from source
+    if (game.ships.length > 0) {
+      if (this.fireStep === this.fireStart) {
+        // acquire target
+        let best = null, bestD = Infinity;
+        for (const s of game.ships) {
+          if (s.dead) continue;
+          const d = dist(this, s);
+          if (d <= this.fireRange && d < bestD) { best = s; bestD = d; }
+        }
+        this.attack = best;
+        if (best) Sfx.play("shoot");
+      } else if (this.fireStep < this.fireStart) {
+        if (!this.attack || this.attack.dead || dist(this, this.attack) > this.fireRange) {
+          this.attack = null;
+          this.fireStep = this.fireCooldown;
+        } else if (this.energy > 0) {
+          // sustained beam: drain a fraction of energyNeeded per frame, deal damage
+          const e = this.energyNeeded / 7 / this.fireStart;
+          this.energy = Math.max(0, this.energy - e);
+          this.attack.damage(this.attackDamage / this.fireStart);
+          this.beam = { tx: this.attack.x, ty: this.attack.y, life: 2 };
+        } else {
+          this.fireStep = 0;
+        }
+        if (this.fireStep === 0) this.fireStep = this.fireCooldown;
+      }
+      this.fireStep -= 1;
+      if (this.fireStep < 0) this.fireStep = this.fireCooldown;
+    }
+    // top off energy occasionally
+    this.tickStep -= 1;
+    if (this.tickStep <= 0) {
+      this.tickStep = 1;
+      if (this.energy < this.energyNeeded / 2) {
+        this.energy += game.requestEnergy(this, this.energyNeeded / 2 - this.energy);
+      }
+    }
+    if (this.beam) {
+      this.beam.life -= 1;
+      if (this.beam.life <= 0) this.beam = null;
+    }
+  }
+  draw(ctx) {
+    if (this.beam) {
+      ctx.strokeStyle = "rgba(126, 255, 0, 0.85)";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(this.beam.tx, this.beam.ty); ctx.stroke();
+    }
+    ctx.fillStyle = this.networked ? "#0f2812" : "#0a1408";
+    ctx.strokeStyle = this.networked ? "#7eff00" : "#3a6a18";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (this.construction < this.constructionTarget) drawConstructionBar(ctx, this);
+  }
+}
+
+// buildingRocket
+class RocketTurret extends Building {
+  constructor(x, y) {
+    super(x, y, "rocket", ROCKET_HP, COSTS.rocket);
+    this.size = 14;
+    this.fireRange = ROCKET_RANGE;
+    this.attackDamage = ROCKET_DAMAGE;
+    this.splash = ROCKET_SPLASH;
+    this.rockets = 1;
+    this.fireCount = 0;
+    this.fireTick = 0;
+    this.fireStep = 0;
+    this.attack = null;
+    this.maxEnergy = ROCKET_MAX_ENERGY;
+    this.tickStep = 4;
+    this.constructionTick = 15;
+  }
+  tick(game) {
+    if (this.construction < this.constructionTarget) {
+      this.constructionStep += 1;
+      if (this.constructionStep >= this.constructionTick) {
+        this.constructionStep = 0;
+        this.buildEnergy += game.requestEnergy(this, 1);
+        if (this.buildEnergy >= 1) {
+          this.buildEnergy -= 1;
+          this.construction += 1;
+          if (this.construction >= this.constructionTarget) {
+            this.finishConstruction();
+            this.energy += 1;
+          }
+        }
+      }
+      return;
+    }
+    if (this.fireStep <= 0) {
+      this.attack = null;
+      let best = null, bestD = Infinity;
+      for (const s of game.ships) {
+        if (s.dead) continue;
+        const d = dist(this, s);
+        if (d <= this.fireRange && d < bestD) { best = s; bestD = d; }
+      }
+      if (best) {
+        this.attack = best;
+        this.fireCount = this.rockets;
+        this.fireTick = 0;
+        this.fireStep = ROCKET_FIRE_GAP;
+      } else {
+        this.fireStep = 20;
+      }
+    }
+    if (this.fireCount > 0) {
+      if (this.fireTick === 0) {
+        if (this.energy >= 1) {
+          // re-acquire if target died
+          if (!this.attack || this.attack.dead) {
+            let best = null, bestD = Infinity;
+            for (const s of game.ships) {
+              if (s.dead) continue;
+              const d = dist(this, s);
+              if (d <= this.fireRange && d < bestD) { best = s; bestD = d; }
+            }
+            this.attack = best;
+          }
+          if (this.attack && game.minerals >= ROCKET_PER_SHOT_COST) {
+            this.energy -= 1;
+            game.minerals -= ROCKET_PER_SHOT_COST;
+            game.rockets.push(new Rocket(this.x, this.y, this.attack, this.attackDamage, this.splash));
+            Sfx.play("shoot");
+          }
+        }
+        this.fireTick = 15;
+        this.fireCount -= 1;
+      }
+      this.fireTick -= 1;
+    }
+    this.fireStep -= 1;
+    this.tickStep -= 1;
+    if (this.tickStep <= 0) {
+      this.tickStep = 4;
+      if (this.energy < this.maxEnergy) {
+        this.energy += game.requestEnergy(this, this.maxEnergy - this.energy);
+        if (this.energy > this.maxEnergy) this.energy = this.maxEnergy;
+      }
+    }
+  }
+  draw(ctx) {
+    ctx.fillStyle = this.networked ? "#2a1f0a" : "#150f04";
+    ctx.strokeStyle = this.networked ? "#f0a060" : "#724820";
+    ctx.lineWidth = 1.5;
+    // body
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // launcher rails
+    ctx.fillStyle = this.networked ? "#f0a060" : "#724820";
+    ctx.fillRect(this.x - 5, this.y - this.size + 2, 3, this.size * 2 - 4);
+    ctx.fillRect(this.x + 2, this.y - this.size + 2, 3, this.size * 2 - 4);
+    if (this.construction < this.constructionTarget) drawConstructionBar(ctx, this);
+  }
+}
+
+class Rocket {
+  constructor(x, y, target, damage, splash) {
+    this.x = x; this.y = y;
+    this.target = target;
+    this.damage = damage;
+    this.splash = splash;
+    this.dead = false;
+  }
+  update(game) {
+    if (!this.target || this.target.dead) { this.dead = true; return; }
+    const d = dist(this, this.target);
+    if (d < 10) {
+      this.target.damage(this.damage);
+      // splash to nearby ships
+      for (const s of game.ships) {
+        if (s === this.target || s.dead) continue;
+        const sd = dist(this, s);
+        if (sd < this.splash) s.damage(this.damage * (1 - sd / this.splash));
+      }
+      this.dead = true;
+      explode(game, this.x, this.y);
+      return;
+    }
+    this.x += (this.target.x - this.x) / d * ROCKET_TRAVEL_SPEED;
+    this.y += (this.target.y - this.y) / d * ROCKET_TRAVEL_SPEED;
+  }
+  draw(ctx) {
+    ctx.fillStyle = "#ffd66f";
+    ctx.beginPath(); ctx.arc(this.x, this.y, 3, 0, Math.PI * 2); ctx.fill();
+    // exhaust trail
+    ctx.strokeStyle = "rgba(255, 140, 60, 0.45)";
+    ctx.lineWidth = 1;
+    const a = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(this.x - Math.cos(a) * 8, this.y - Math.sin(a) * 8);
+    ctx.stroke();
+  }
+}
+
+// Ship base (enemy). Sub-classes set their stats.
+class Ship extends Entity {
+  constructor(x, y, hp, speed, damage, fireRange, kind = "fighter") {
+    super(x, y, hp);
+    this.kind = "ship";
+    this.shipKind = kind;
+    this.size = 8;
+    this.maxSpeed = speed;
+    this.speed = speed;
+    this.attackDamage = damage;
+    this.fireRange = fireRange;
+    this.fireStep = 50;
+    this.target = null;        // current building target
+    this.attackCd = 0;
+  }
+  tick(game) {
+    // pick a target — closest building (matches source heuristic for ship1)
+    if (!this.target || this.target.dead) {
+      let best = null, bestD = Infinity;
+      for (const b of game.buildings) {
+        if (b.dead) continue;
+        const d = dist(this, b);
+        if (d < bestD) { best = b; bestD = d; }
+      }
+      this.target = best;
+    }
+    if (!this.target) return;
+    const dx = this.target.x - this.x;
+    const dy = this.target.y - this.y;
+    const d = Math.hypot(dx, dy);
+    if (d > this.fireRange) {
+      this.x += (dx / d) * this.speed;
+      this.y += (dy / d) * this.speed;
+    } else {
+      // in range: fire on cooldown
+      this.fireStep -= 1;
+      if (this.fireStep <= 0) {
+        this.target.damage(this.attackDamage);
+        this.fireStep = 50;
+        Sfx.play("hit");
+      }
+    }
+  }
+  draw(ctx) {
+    ctx.fillStyle = "#3a0a0a";
+    ctx.strokeStyle = "#ff5d4d";
+    ctx.lineWidth = 1.5;
+    const r = this.size;
+    ctx.beginPath();
+    ctx.moveTo(this.x + r, this.y);
+    ctx.lineTo(this.x - r * 0.6, this.y - r * 0.7);
+    ctx.lineTo(this.x - r * 0.6, this.y + r * 0.7);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    if (this.hp < this.maxHp) drawHpBar(ctx, this, 14);
+  }
+}
+
+function explode(game, x, y) {
+  // tiny particle pool — minimal effect for now
+  for (let i = 0; i < 6; i++) {
+    game.particles.push({ x, y, vx: rand(-60, 60), vy: rand(-60, 60), life: rand(0.3, 0.6), maxLife: 0.6 });
+  }
+}
+
 // ---------- HUD drawing helpers ----------
 function drawConstructionBar(ctx, b) {
   const w = (b.size || 8) * 2;
@@ -422,16 +737,19 @@ class Game {
     nextId = 1;
     this.buildings = [];
     this.asteroids = this.spawnAsteroidField();
-    this.minerals = 1000;            // mission 1 starts with 1000 in source
+    this.ships = [];
+    this.rockets = [];
+    this.particles = [];
+    this.minerals = 1000;
     this.totalMined = 0;
     this.goal = 1500;
     this.time = 0;
     this.tickCount = 0;
     this.speed = 1;
     this.over = null;
-    this.pathDirty = true;
+    this.waveNumber = 0;
+    this.nextWaveAt = 60;            // first wave at 60s sim time
     this.camera.x = 0; this.camera.y = 0; this.camera.scale = 1; this.camera.targetScale = 1;
-    // place starter energy generator at origin (matches the AS2 training setup)
     const eg = new EnergyGen(0, 0);
     eg.construction = eg.constructionTarget;
     eg.energy = eg.maxEnergy;
@@ -441,6 +759,23 @@ class Game {
     this.refreshBuildUI();
     this.refreshSpeedUI();
     this.refreshHud();
+  }
+
+  spawnWave() {
+    this.waveNumber += 1;
+    const count = 3 + this.waveNumber * 2;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 600;
+      const sx = Math.cos(a) * r;
+      const sy = Math.sin(a) * r;
+      const hp = SHIP_FIGHTER_HP * (1 + (this.waveNumber - 1) * 0.25);
+      const speed = (0.8 + Math.random() * 0.3) * 1.6;   // px per tick * scale to look right
+      const dmg = SHIP_FIGHTER_DAMAGE * (1 + (this.waveNumber - 1) * 0.15);
+      this.ships.push(new Ship(sx, sy, hp, speed, dmg, 70, "fighter"));
+    }
+    this.nextWaveAt = this.time + 45 + this.waveNumber * 6;
+    Sfx.play("wave");
   }
 
   // Generate a small asteroid field (placeholder until level data is ported).
@@ -549,6 +884,8 @@ class Game {
     if (type === "relay")  b = new Relay(x, y);
     else if (type === "miner")  b = new Miner(x, y);
     else if (type === "energy") b = new EnergyGen(x, y);
+    else if (type === "laser")  b = new LaserTurret(x, y);
+    else if (type === "rocket") b = new RocketTurret(x, y);
     else return;
     this.minerals -= cost;
     this.buildings.push(b);
@@ -672,25 +1009,42 @@ class Game {
       b.tick(this);
       b.tickFlash(1 / TPS);
     }
+    // ships
+    for (const s of this.ships) { if (!s.dead) s.tick(this); }
+    // rockets
+    for (const r of this.rockets) r.update(this);
+    this.rockets = this.rockets.filter(r => !r.dead);
+    // particles
+    for (const p of this.particles) {
+      p.x += p.vx / TPS; p.y += p.vy / TPS;
+      p.vx *= 0.94; p.vy *= 0.94;
+      p.life -= 1 / TPS;
+    }
+    this.particles = this.particles.filter(p => p.life > 0);
+    // wave timer
+    if (this.time >= this.nextWaveAt && !this.over) this.spawnWave();
     // dirty path if any building just finished construction
     let wasDirty = false;
     for (const b of this.buildings) {
       if (b.justFinished) { wasDirty = true; b.justFinished = false; }
     }
-    // cull dead buildings + recompute when topology changes
+    // cull dead ships + buildings
+    for (const s of this.ships) if (s.dead) explode(this, s.x, s.y);
+    this.ships = this.ships.filter(s => !s.dead);
     const before = this.buildings.length;
     this.buildings = this.buildings.filter(b => !b.dead);
     if (this.buildings.length !== before || wasDirty) {
       this.recomputeLinks();
       this.path();
     }
-    // asteroids
     this.asteroids = this.asteroids.filter(a => !a.dead);
-    // refresh miner planet lists periodically (cheap)
     if (this.tickCount % 30 === 0) {
       for (const b of this.buildings) if (b instanceof Miner) b.refreshPlanets(this);
     }
+    // win / lose
     if (this.totalMined >= this.goal) { this.over = "win"; Sfx.play("win"); }
+    // lose if all buildings are gone (no recovery possible)
+    if (this.buildings.length === 0) { this.over = "lose"; Sfx.play("lose"); }
     this.refreshHud();
   }
 
@@ -727,11 +1081,38 @@ class Game {
     for (const a of this.asteroids) a.draw(ctx);
     // buildings
     for (const b of this.buildings) b.draw(ctx);
+    // ships
+    for (const s of this.ships) if (!s.dead) s.draw(ctx);
+    // rockets
+    for (const r of this.rockets) r.draw(ctx);
+    // particles
+    for (const p of this.particles) {
+      const a = clamp(p.life / p.maxLife, 0, 1);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = "#ff8844";
+      ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
 
     // placement preview
     if (this.placement && this.mouse.in) this.drawPlacementPreview(ctx);
 
     ctx.restore();
+
+    // wave countdown text overlay (in screen space)
+    if (!this.over && this.ships.length === 0) {
+      const t = Math.max(0, this.nextWaveAt - this.time);
+      ctx.fillStyle = "rgba(255, 220, 120, 0.75)";
+      ctx.font = "13px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`Wave ${this.waveNumber + 1} in ${t.toFixed(1)}s`, W / 2, 22);
+    }
+    if (this.over) {
+      ctx.fillStyle = this.over === "win" ? "rgba(107, 217, 107, 0.95)" : "rgba(255, 116, 102, 0.95)";
+      ctx.font = "bold 28px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(this.over === "win" ? "MISSION COMPLETE" : "BASE DESTROYED", W / 2, H / 2);
+    }
   }
 
   drawPlacementPreview(ctx) {
@@ -752,6 +1133,12 @@ class Game {
     if (this.placement === "miner") {
       ctx.strokeStyle = "rgba(240, 193, 75, 0.4)";
       ctx.beginPath(); ctx.arc(x, y, MINE_RANGE, 0, Math.PI * 2); ctx.stroke();
+    } else if (this.placement === "laser") {
+      ctx.strokeStyle = "rgba(126, 255, 0, 0.4)";
+      ctx.beginPath(); ctx.arc(x, y, LASER_RANGE, 0, Math.PI * 2); ctx.stroke();
+    } else if (this.placement === "rocket") {
+      ctx.strokeStyle = "rgba(240, 160, 96, 0.4)";
+      ctx.beginPath(); ctx.arc(x, y, ROCKET_RANGE, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.setLineDash([]);
   }
