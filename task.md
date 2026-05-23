@@ -54,9 +54,10 @@ Lives here so it survives context resets.
 
 ## Stopping point
 
-Hit reasonable parity with the Flash version's core gameplay loop in 7 batches.
-Original Flash content beyond this scope: multiplayer, asset-based sound and
-sprites, multiple campaign trees, more upgrade depth.
+Hit reasonable parity with the Flash version's core gameplay loop in 8 batches.
+Original Flash content beyond this scope: asset-based sprites and music,
+deeper upgrade trees with more building tiers, and the campaign continuation
+in *The Space Game: Missions* (the 2010 sequel with more levels).
 
 ## Notes
 
