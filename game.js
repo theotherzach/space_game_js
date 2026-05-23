@@ -411,23 +411,36 @@ class Miner extends Building {
 }
 
 // Mineral asteroid: stores ore as ._energy, dies when depleted.
+// Source asteroidField sets `_size = size + 5` where `size` ∈ [1,21], giving
+// a radius range of [6, 26]. Energy is (5 + size) * 52 = [312, 1352].
 class Asteroid extends Entity {
-  constructor(x, y, energy) {
+  constructor(x, y, rawSize) {
+    const energy = (5 + rawSize) * 52;
     super(x, y, energy);
     this.energy = energy;
     this.maxEnergy = energy;
-    this.size = 7 + Math.min(10, energy / 40);
+    this.rawSize = rawSize;
+    this.size = rawSize + 5;       // matches source asteroid._size
   }
   draw(ctx) {
     const t = this.maxEnergy > 0 ? this.energy / this.maxEnergy : 0;
-    ctx.fillStyle = `rgba(120, 200, 100, ${0.3 + 0.5 * t})`;
-    ctx.strokeStyle = `rgba(180, 240, 150, ${0.5 + 0.5 * t})`;
+    // outer fill darkens as the asteroid is mined out
+    ctx.fillStyle = `rgba(110, 180, 90, ${0.25 + 0.45 * t})`;
+    ctx.strokeStyle = `rgba(180, 240, 150, ${0.4 + 0.45 * t})`;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "rgba(220, 255, 200, 0.9)";
-    ctx.font = "10px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(Math.ceil(this.energy), this.x, this.y - this.size - 4);
+    // inner ore patch shrinks as it's depleted (mirrors mcFull / mcEmpty in source)
+    if (t > 0) {
+      ctx.fillStyle = `rgba(180, 240, 130, ${0.6 + 0.3 * t})`;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.size * (0.4 + 0.5 * t), 0, Math.PI * 2); ctx.fill();
+    }
+    // numeric label scaled to readable
+    if (this.size >= 9) {
+      ctx.fillStyle = "rgba(220, 255, 200, 0.9)";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(Math.ceil(this.energy), this.x, this.y - this.size - 4);
+    }
   }
 }
 
@@ -495,7 +508,9 @@ class LaserTurret extends Building {
           const e = this.energyNeeded / 7 / this.fireStart;
           this.energy = Math.max(0, this.energy - e);
           this.attack.damage(this.attackDamage);
-          this.beam = { tx: this.attack.x, ty: this.attack.y, life: 2 };
+          // Beam life 4 ticks (~130ms at 30 TPS) makes the shot visible;
+          // a stale beam pointing at a dead target still reads as "fired"
+          this.beam = { tx: this.attack.x, ty: this.attack.y, life: 4 };
         } else {
           this.fireStep = 0;
         }
@@ -1158,9 +1173,8 @@ class Game {
       }
       const cx = ax * Math.cos(fieldRot) - ay * Math.sin(fieldRot);
       const cy = ax * Math.sin(fieldRot) + ay * Math.cos(fieldRot);
-      const size = 1 + Math.floor(Math.random() * 21);
-      const energy = (5 + size) * 52;
-      out.push(new Asteroid(snap(cx), snap(cy), energy));
+      const size = 1 + Math.floor(Math.random() * 21);   // source: nextIntRange(1, 21)
+      out.push(new Asteroid(snap(cx), snap(cy), size));
     }
     return out;
   }
