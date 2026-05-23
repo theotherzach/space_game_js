@@ -4,8 +4,10 @@
 const W = 1024;
 const H = 640;
 
-const COSTS = { connector: 15, miner: 40, turret: 60 };
+const COSTS = { connector: 15, miner: 40, turret: 60, laser: 150, booster: 80 };
 const SELL_REFUND = 0.6;        // 60% of build cost refunded on demolish
+const BOOSTER_RADIUS = 90;      // miners/turrets inside this gain a bonus per booster
+const BOOSTER_BONUS = 0.25;     // additive per nearby booster (stacks)
 
 // Base values — research multiplies these. See computeTech() below.
 const BASE_TECH = Object.freeze({
@@ -188,7 +190,7 @@ class Miner extends Entity {
       }
     }
     if (this.target) {
-      const amt = game.tech.minerRate * dt;
+      const amt = game.tech.minerRate * boostMult(this, game) * dt;
       const taken = this.target.extract(amt);
       game.minerals_collected += taken;
       game.recent_mined += taken;
@@ -212,18 +214,23 @@ class Miner extends Entity {
 }
 
 class Turret extends Entity {
-  constructor(x, y) {
-    super(x, y, TURRET_HP);
-    this.radius = 11;
+  constructor(x, y, variant = "standard") {
+    super(x, y, variant === "laser" ? 70 : TURRET_HP);
+    this.variant = variant;
+    this.radius = variant === "laser" ? 12 : 11;
     this.kind = "turret";
     this.networked = false;
     this.cooldown = 0;
     this.aimAngle = 0;
+    // multipliers vs. global tech values
+    this.rangeMult = variant === "laser" ? 1.55 : 1.0;
+    this.damageMult = variant === "laser" ? 2.1 : 1.0;
+    this.fireMult = variant === "laser" ? 1.6 : 1.0;     // higher = slower
   }
   update(dt, game) {
     if (!this.networked) return;
     this.cooldown -= dt;
-    const range = game.tech.turretRange;
+    const range = game.tech.turretRange * this.rangeMult;
     // find nearest enemy in range
     let target = null, best = Infinity;
     for (const e of game.enemies) {
@@ -233,25 +240,81 @@ class Turret extends Entity {
     if (target) {
       this.aimAngle = Math.atan2(target.y - this.y, target.x - this.x);
       if (this.cooldown <= 0) {
-        game.bullets.push(new Bullet(this.x, this.y, target, game.tech.turretDamage));
-        this.cooldown = game.tech.turretFireInterval;
+        const boost = boostMult(this, game);
+        const dmg = game.tech.turretDamage * this.damageMult * boost;
+        game.bullets.push(new Bullet(this.x, this.y, target, dmg, this.variant));
+        this.cooldown = (game.tech.turretFireInterval * this.fireMult) / boost;
         Sfx.play("shoot");
       }
     }
   }
   draw(ctx) {
-    ctx.fillStyle = this.networked ? "#2c1313" : "#1a0a0a";
-    ctx.strokeStyle = this.networked ? "#ff7466" : "#683838";
+    const laser = this.variant === "laser";
+    ctx.fillStyle = this.networked
+      ? (laser ? "#10293d" : "#2c1313")
+      : (laser ? "#0a1424" : "#1a0a0a");
+    ctx.strokeStyle = this.networked
+      ? (laser ? "#6fd1ff" : "#ff7466")
+      : (laser ? "#3a5a78" : "#683838");
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     // barrel
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.aimAngle);
-    ctx.fillStyle = this.networked ? "#ff7466" : "#683838";
-    ctx.fillRect(0, -2, 13, 4);
+    ctx.fillStyle = this.networked
+      ? (laser ? "#6fd1ff" : "#ff7466")
+      : (laser ? "#3a5a78" : "#683838");
+    ctx.fillRect(0, -2, laser ? 17 : 13, laser ? 5 : 4);
     ctx.restore();
   }
+}
+
+// Booster: networked aura that buffs nearby miners and turrets.
+class Booster extends Entity {
+  constructor(x, y) {
+    super(x, y, 30);
+    this.radius = 9;
+    this.kind = "booster";
+    this.networked = false;
+    this.pulse = 0;
+  }
+  update(dt, _game) { this.pulse += dt; }
+  draw(ctx) {
+    ctx.strokeStyle = this.networked ? "#6bd96b" : "#3a5a3a";
+    ctx.fillStyle = this.networked ? "#142a18" : "#0e160e";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // hexagon mark
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3;
+      const px = this.x + Math.cos(a) * 4;
+      const py = this.y + Math.sin(a) * 4;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = this.networked ? "#6bd96b" : "#3a5a3a";
+    ctx.stroke();
+    if (this.networked) {
+      const r = BOOSTER_RADIUS + 3 * Math.sin(this.pulse * 3);
+      ctx.globalAlpha = 0.15 + 0.08 * Math.sin(this.pulse * 3);
+      ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = "#6bd96b";
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+function boostMult(building, game) {
+  if (!building.networked) return 1;
+  let mult = 1;
+  for (const b of game.buildings) {
+    if (b.kind !== "booster" || !b.networked || b.dead) continue;
+    if (dist(b, building) < BOOSTER_RADIUS) mult += BOOSTER_BONUS;
+  }
+  return mult;
 }
 
 class Mineral extends Entity {
@@ -284,8 +347,8 @@ class Mineral extends Entity {
 class Enemy extends Entity {
   constructor(x, y, hp, speed, damage, value, kind = "raider") {
     super(x, y, hp);
-    this.radius = kind === "scout" ? 5 : kind === "tank" ? 11 : 7;
-    this.kind = kind;            // "raider" | "scout" | "tank"
+    this.radius = kind === "scout" ? 5 : kind === "tank" ? 11 : kind === "bomber" ? 8 : 7;
+    this.kind = kind;            // "raider" | "scout" | "tank" | "bomber"
     this.speed = speed;
     this.attackDamage = damage;  // NOT `damage` — that would shadow Entity.damage()
     this.value = value;
@@ -312,10 +375,14 @@ class Enemy extends Entity {
       this.x += vx;
       this.y += vy;
     } else {
-      this.attackCd -= dt;
-      if (this.attackCd <= 0) {
-        t.damage(this.attackDamage);
-        this.attackCd = 0.6;
+      if (this.kind === "bomber") {
+        this.dead = true;     // suicide on contact; AOE handled in cleanup
+      } else {
+        this.attackCd -= dt;
+        if (this.attackCd <= 0) {
+          t.damage(this.attackDamage);
+          this.attackCd = 0.6;
+        }
       }
     }
   }
@@ -326,12 +393,29 @@ class Enemy extends Entity {
     } else if (this.kind === "tank") {
       ctx.fillStyle = "#451010";
       ctx.strokeStyle = "#9a2222";
+    } else if (this.kind === "bomber") {
+      ctx.fillStyle = "#683210";
+      ctx.strokeStyle = "#ff8800";
     } else {
       ctx.fillStyle = "#7a1818";
       ctx.strokeStyle = "#ff5d4d";
     }
     ctx.lineWidth = 1.5;
-    if (this.kind === "tank") {
+    if (this.kind === "bomber") {
+      const r = this.radius;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y - r);
+      ctx.lineTo(this.x + r, this.y);
+      ctx.lineTo(this.x, this.y + r);
+      ctx.lineTo(this.x - r, this.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // pulsing core
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 100);
+      ctx.fillStyle = `rgba(255, 200, 80, ${0.4 + 0.4 * pulse})`;
+      ctx.beginPath(); ctx.arc(this.x, this.y, 2 + pulse * 1.4, 0, Math.PI * 2); ctx.fill();
+    } else if (this.kind === "tank") {
       // armored block
       const r = this.radius;
       ctx.beginPath();
@@ -359,7 +443,7 @@ class Enemy extends Entity {
       ctx.fill();
       ctx.stroke();
     }
-    drawHpBar(ctx, this, this.kind === "scout" ? 9 : this.kind === "tank" ? 18 : 11);
+    drawHpBar(ctx, this, this.kind === "scout" ? 9 : this.kind === "tank" ? 18 : this.kind === "bomber" ? 13 : 11);
   }
 }
 
@@ -406,11 +490,12 @@ function drawFlashOverlay(ctx, e) {
 }
 
 class Bullet {
-  constructor(x, y, target, damage) {
+  constructor(x, y, target, damage, variant = "standard") {
     this.x = x; this.y = y;
     this.target = target;
     this.damage = damage;
-    this.speed = 520;
+    this.variant = variant;
+    this.speed = variant === "laser" ? 780 : 520;
     this.dead = false;
   }
   update(dt) {
@@ -426,8 +511,8 @@ class Bullet {
     this.y += (this.target.y - this.y) / d * this.speed * dt;
   }
   draw(ctx) {
-    ctx.fillStyle = "#ffd66f";
-    ctx.beginPath(); ctx.arc(this.x, this.y, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = this.variant === "laser" ? "#aeeaff" : "#ffd66f";
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.variant === "laser" ? 3 : 2.5, 0, Math.PI * 2); ctx.fill();
   }
 }
 
@@ -637,7 +722,9 @@ class Game {
     let b;
     if (kind === "connector") b = new Connector(x, y);
     else if (kind === "miner") b = new Miner(x, y);
-    else if (kind === "turret") b = new Turret(x, y);
+    else if (kind === "turret") b = new Turret(x, y, "standard");
+    else if (kind === "laser") b = new Turret(x, y, "laser");
+    else if (kind === "booster") b = new Booster(x, y);
     if (!b) return;
     if (this.tech.hpMult !== 1) b.applyHpMult(this.tech.hpMult);
     this.minerals_stored -= cost;
@@ -672,12 +759,14 @@ class Game {
   prepareWaveSpec() {
     const w = this.wave_number + 1;
     const raiders = 2 + w;
-    const scouts = w >= 2 ? Math.floor((w - 1) / 2) + 1 : 0;
-    const tanks = w >= 3 ? 1 + Math.floor((w - 3) / 2) : 0;
+    const scouts  = w >= 2 ? Math.floor((w - 1) / 2) + 1 : 0;
+    const tanks   = w >= 3 ? 1 + Math.floor((w - 3) / 2) : 0;
+    const bombers = w >= 4 ? 1 + Math.floor((w - 4) / 3) : 0;
     const composition = [];
     for (let i = 0; i < raiders; i++) composition.push("raider");
     for (let i = 0; i < scouts;  i++) composition.push("scout");
     for (let i = 0; i < tanks;   i++) composition.push("tank");
+    for (let i = 0; i < bombers; i++) composition.push("bomber");
     const positions = composition.map(kind => ({ kind, ...this.pickEdgePoint() }));
     this.upcomingWave = { w, positions };
   }
@@ -695,9 +784,12 @@ class Game {
     const tankHp = 90 + w * 18;
     const tankSpeed = 18 + w;
     const tankDmg = 10 + w * 2;
+    const bomberHp = 30 + w * 5;
+    const bomberSpeed = 55 + w * 2;
     for (const slot of positions) {
       if (slot.kind === "scout") this.enemies.push(new Enemy(slot.x, slot.y, scoutHp, scoutSpeed, scoutDmg, 3, "scout"));
       else if (slot.kind === "tank") this.enemies.push(new Enemy(slot.x, slot.y, tankHp, tankSpeed, tankDmg, 20, "tank"));
+      else if (slot.kind === "bomber") this.enemies.push(new Enemy(slot.x, slot.y, bomberHp, bomberSpeed, 0, 12, "bomber"));
       else this.enemies.push(new Enemy(slot.x, slot.y, raiderHp, raiderSpeed, raiderDmg, 6, "raider"));
     }
     this.upcomingWave = null;
@@ -762,9 +854,23 @@ class Game {
     for (const e of this.enemies) {
       if (e.dead) {
         this.minerals_stored += e.value;
-        const c = e.kind === "scout" ? "#c884ff" : e.kind === "tank" ? "#9a2222" : "#ff5d4d";
-        explode(this, e.x, e.y, c, e.kind === "tank" ? 22 : 12);
+        let c = e.kind === "scout" ? "#c884ff"
+              : e.kind === "tank"  ? "#9a2222"
+              : e.kind === "bomber" ? "#ff8800"
+              : "#ff5d4d";
+        let count = e.kind === "tank" ? 22 : e.kind === "bomber" ? 28 : 12;
+        explode(this, e.x, e.y, c, count);
         Sfx.play("death");
+        // bomber AOE: damages all buildings within radius, falls off linearly
+        if (e.kind === "bomber") {
+          const aoeR = 72;
+          const aoeMax = 36 + this.wave_number * 4;
+          for (const b of this.buildings) {
+            if (b.dead) continue;
+            const d = dist(b, e);
+            if (d < aoeR) b.damage(aoeMax * (1 - d / aoeR));
+          }
+        }
       } else alive.push(e);
     }
     this.enemies = alive;
@@ -911,10 +1017,8 @@ class Game {
     }
     const cost = COSTS[kind];
     const affordable = this.minerals_stored >= cost;
-    let r = 10;
-    if (kind === "connector") r = 8;
-    if (kind === "miner") r = 10;
-    if (kind === "turret") r = 11;
+    const radii = { connector: 8, miner: 10, turret: 11, laser: 12, booster: 9 };
+    const r = radii[kind] ?? 10;
     ctx.lineWidth = 1.2;
     ctx.strokeStyle = affordable ? "rgba(111, 209, 255, 0.8)" : "rgba(255, 116, 102, 0.8)";
     ctx.fillStyle = "rgba(111, 209, 255, 0.1)";
@@ -930,6 +1034,12 @@ class Game {
     } else if (kind === "turret") {
       ctx.strokeStyle = "rgba(255, 116, 102, 0.3)";
       ctx.beginPath(); ctx.arc(x, y, this.tech.turretRange, 0, Math.PI * 2); ctx.stroke();
+    } else if (kind === "laser") {
+      ctx.strokeStyle = "rgba(111, 209, 255, 0.35)";
+      ctx.beginPath(); ctx.arc(x, y, this.tech.turretRange * 1.55, 0, Math.PI * 2); ctx.stroke();
+    } else if (kind === "booster") {
+      ctx.strokeStyle = "rgba(107, 217, 107, 0.35)";
+      ctx.beginPath(); ctx.arc(x, y, BOOSTER_RADIUS, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.setLineDash([]);
   }
