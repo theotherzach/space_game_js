@@ -45,6 +45,13 @@ const MISSIONS = [
     mineralAbundance: 1.3, clusters: 9, nodePerCluster: 4.5,
     waveStartDelay: 15, waveCountMult: 1.5, waveStatMult: 1.35,
   },
+  {
+    id: 4, name: "Endless: Hold the Line",
+    goal: Infinity, startingMinerals: 80,
+    mineralAbundance: 1.2, clusters: 9, nodePerCluster: 4,
+    waveStartDelay: 14, waveCountMult: 1.35, waveStatMult: 1.25,
+    endless: true,
+  },
 ];
 const MISSION_BY_ID = Object.fromEntries(MISSIONS.map(m => [m.id, m]));
 const SAVE_KEY = "space_game_js.save.v1";
@@ -586,20 +593,34 @@ class Game {
     canvas.addEventListener("contextmenu", e => { e.preventDefault(); this.placement = null; this.refreshBuildUI(); });
 
     document.addEventListener("keydown", e => {
+      if (e.target && e.target.tagName === "INPUT") return;
+      const k = e.key.toLowerCase();
       if (e.key === "Escape") {
-        if (!document.getElementById("tech-panel").classList.contains("hidden")) {
-          this.toggleTechPanel(false);
-        } else {
-          this.placement = null; this.refreshBuildUI();
-        }
+        if (!document.getElementById("tech-panel").classList.contains("hidden")) this.toggleTechPanel(false);
+        else if (!document.getElementById("mission-panel").classList.contains("hidden")) this.closeMissionPanel();
+        else if (!document.getElementById("help-panel").classList.contains("hidden")) this.toggleHelp(false);
+        else { this.placement = null; this.refreshBuildUI(); }
+        return;
       }
-      if (e.key === " ") { this.speed = this.speed === 0 ? 1 : 0; this.refreshSpeedUI(); }
-      if (e.key === "r" || e.key === "R") this.toggleTechPanel();
-      if (e.key === "w" || e.key === "W") this.skipToNextWave();
-      if (e.key === "m" || e.key === "M") {
+      if (e.key === " ") { e.preventDefault(); this.speed = this.speed === 0 ? 1 : 0; this.refreshSpeedUI(); return; }
+      // build shortcuts
+      const buildMap = { c: "connector", d: "miner", t: "turret", l: "laser", b: "booster", x: "sell" };
+      if (buildMap[k]) {
+        this.placement = (this.placement === buildMap[k]) ? null : buildMap[k];
+        this.refreshBuildUI();
+        return;
+      }
+      if (k === "r") this.toggleTechPanel();
+      else if (k === "w") this.skipToNextWave();
+      else if (k === "m") {
         Sfx.setEnabled(!Sfx.enabled);
         const mb = document.getElementById("mute"); if (mb) mb.textContent = Sfx.enabled ? "🔊" : "🔇";
       }
+      else if (k === "h" || e.key === "?") this.toggleHelp();
+      else if (k === "1") { this.speed = 0; this.refreshSpeedUI(); }
+      else if (k === "2") { this.speed = 0.5; this.refreshSpeedUI(); }
+      else if (k === "3") { this.speed = 1; this.refreshSpeedUI(); }
+      else if (k === "4") { this.speed = 3; this.refreshSpeedUI(); }
     });
 
     for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
@@ -611,6 +632,8 @@ class Game {
     document.getElementById("restart").addEventListener("click", () => this.reset(this.mission.id));
     document.getElementById("missions").addEventListener("click", () => this.openMissionPanel());
     document.getElementById("mission-close").addEventListener("click", () => this.closeMissionPanel());
+    document.getElementById("help").addEventListener("click", () => this.toggleHelp());
+    document.getElementById("help-close").addEventListener("click", () => this.toggleHelp(false));
     document.getElementById("reset-save").addEventListener("click", () => {
       if (confirm("Reset all progress (research + unlocked missions)?")) this.hardReset();
     });
@@ -1118,10 +1141,20 @@ class Game {
     document.getElementById("energy").textContent = networked_count;
     document.getElementById("energy-max").textContent = this.buildings.length - 1;
     document.getElementById("clock").textContent = fmtTime(this.time);
-    document.getElementById("goal").textContent = `${Math.floor(this.minerals_collected)}/${this.mission.goal}`;
+    const goalEl = document.getElementById("goal");
+    if (this.mission.endless) {
+      goalEl.textContent = `Wave ${this.wave_number} · ${Math.floor(this.minerals_collected)} mined`;
+    } else {
+      goalEl.textContent = `${Math.floor(this.minerals_collected)}/${this.mission.goal}`;
+    }
     document.getElementById("mission").textContent = this.mission.id;
     const ml = document.getElementById("mission-label");
     if (ml) ml.textContent = this.mission.name;
+    const totalEl = document.getElementById("total-minerals");
+    if (totalEl) {
+      const total = this.minerals.reduce((s, m) => s + (m.dead ? 0 : m.amount), 0);
+      totalEl.textContent = Math.floor(total);
+    }
     // also update build button affordability tinting
     for (const btn of document.querySelectorAll("#build button[data-build]")) {
       const kind = btn.dataset.build;
@@ -1194,10 +1227,11 @@ class Game {
       const card = document.createElement("button");
       const locked = m.id > this.unlocked;
       card.className = "mission-card" + (locked ? " locked" : "") + (m.id === this.mission.id ? " current" : "");
+      const goalText = m.endless ? "Endless — survive as long as you can" : `Goal: ${m.goal} minerals`;
       card.innerHTML = `
-        <span class="m-id">M${m.id}</span>
-        <span class="m-name">${m.name.replace(/^Mission \d+:\s*/, "")}</span>
-        <span class="m-goal">Goal: ${m.goal} minerals</span>
+        <span class="m-id">${m.endless ? "∞" : "M" + m.id}</span>
+        <span class="m-name">${m.name.replace(/^Mission \d+:\s*|^Endless:\s*/, "")}</span>
+        <span class="m-goal">${goalText}</span>
         ${locked ? `<span class="m-lock">Locked — finish M${m.id - 1} to unlock</span>` : ""}
       `;
       if (!locked) card.addEventListener("click", () => {
@@ -1211,6 +1245,13 @@ class Game {
   closeMissionPanel() {
     const panel = document.getElementById("mission-panel");
     if (panel) panel.classList.add("hidden");
+  }
+
+  toggleHelp(force) {
+    const panel = document.getElementById("help-panel");
+    if (!panel) return;
+    const showing = force === undefined ? panel.classList.contains("hidden") : force;
+    panel.classList.toggle("hidden", !showing);
   }
 
   toggleTechPanel(force) {
