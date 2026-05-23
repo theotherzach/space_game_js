@@ -976,6 +976,10 @@ class Game {
       this.unlocked = this.mission.id + 1;
       this.persistSave();
     }
+    if (state === "lose" && this.mission.endless && this.wave_number > (this.bestEndlessWave || 0)) {
+      this.bestEndlessWave = this.wave_number;
+      this.persistSave();
+    }
     this.showEndBanner(state);
     Sfx.play(state);
   }
@@ -985,12 +989,14 @@ class Game {
     try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || "{}"); } catch (_) {}
     this.researched = new Set(s.researched || []);
     this.unlocked = clamp(s.unlocked || 1, 1, MISSIONS.length);
+    this.bestEndlessWave = s.bestEndlessWave || 0;
   }
   persistSave() {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
         researched: [...this.researched],
         unlocked: this.unlocked,
+        bestEndlessWave: this.bestEndlessWave || 0,
       }));
     } catch (_) {}
   }
@@ -1034,8 +1040,9 @@ class Game {
     // particles
     for (const p of this.particles) p.draw(ctx);
 
-    // placement preview
+    // placement preview / hover info (mutually exclusive)
     if (this.placement && this.mouse.in) this.drawPlacementPreview(ctx);
+    else if (this.mouse.in) this.drawHoverInfo(ctx);
 
     // wave countdown + approach markers
     if (!this.over && this.enemies.length === 0) {
@@ -1048,6 +1055,85 @@ class Game {
       if (t <= 3 && this.upcomingWave) {
         this.drawApproachMarkers(ctx, t);
       }
+    }
+  }
+
+  drawHoverInfo(ctx) {
+    const m = { x: this.mouse.x, y: this.mouse.y };
+    let target = null;
+    for (const b of this.buildings) {
+      if (b.dead) continue;
+      if (dist(m, b) <= (b.radius || 8) + 4) { target = { kind: "building", obj: b }; break; }
+    }
+    if (!target) for (const e of this.enemies) {
+      if (dist(m, e) <= (e.radius || 6) + 4) { target = { kind: "enemy", obj: e }; break; }
+    }
+    if (!target) for (const ore of this.minerals) {
+      if (ore.dead) continue;
+      if (dist(m, ore) <= (ore.radius || 6) + 4) { target = { kind: "mineral", obj: ore }; break; }
+    }
+    if (!target) return;
+
+    const lines = [];
+    if (target.kind === "building") {
+      const b = target.obj;
+      const name = b.kind === "base" ? "Command Base"
+        : b.kind === "connector" ? "Connector"
+        : b.kind === "miner" ? "Miner"
+        : b.kind === "turret" ? (b.variant === "laser" ? "Laser Turret" : "Turret")
+        : b.kind === "booster" ? "Booster"
+        : b.kind;
+      lines.push(name);
+      lines.push(`HP ${Math.ceil(b.hp)}/${Math.ceil(b.maxHp)}`);
+      lines.push(b.networked ? "Networked" : "Out of range");
+      if (b.kind === "miner") {
+        const rate = this.tech.minerRate * boostMult(b, this);
+        lines.push(`${rate.toFixed(1)} min/s · range ${Math.round(this.tech.mineRange)}`);
+      } else if (b.kind === "turret") {
+        const boost = boostMult(b, this);
+        const dmg = this.tech.turretDamage * (b.damageMult || 1) * boost;
+        const interval = (this.tech.turretFireInterval * (b.fireMult || 1)) / boost;
+        const range = this.tech.turretRange * (b.rangeMult || 1);
+        lines.push(`dmg ${dmg.toFixed(1)} · ${(1 / interval).toFixed(2)}/s · range ${Math.round(range)}`);
+      } else if (b.kind === "booster") {
+        lines.push(`+${Math.round(BOOSTER_BONUS * 100)}% to networked miners/turrets`);
+        lines.push(`within ${BOOSTER_RADIUS}px`);
+      } else if (b.kind === "connector") {
+        lines.push(`Range ${Math.round(this.tech.connectRange)}`);
+      }
+    } else if (target.kind === "enemy") {
+      const e = target.obj;
+      const name = e.kind[0].toUpperCase() + e.kind.slice(1);
+      lines.push(name);
+      lines.push(`HP ${Math.ceil(e.hp)}/${Math.ceil(e.maxHp)}`);
+      if (e.kind === "bomber") lines.push("Suicide AOE on contact");
+      else lines.push(`Attack ${Math.ceil(e.attackDamage)}`);
+      lines.push(`Speed ${Math.round(e.speed)}`);
+    } else {
+      const ore = target.obj;
+      lines.push("Mineral asteroid");
+      lines.push(`${Math.ceil(ore.amount)} / ${Math.ceil(ore.maxHp)} remaining`);
+    }
+
+    ctx.font = "11px monospace";
+    const pad = 7;
+    let maxW = 0;
+    for (const line of lines) { const w = ctx.measureText(line).width; if (w > maxW) maxW = w; }
+    const boxW = maxW + pad * 2;
+    const boxH = lines.length * 14 + pad * 2;
+    let bx = this.mouse.x + 14;
+    let by = this.mouse.y + 14;
+    if (bx + boxW > W - 4) bx = this.mouse.x - boxW - 14;
+    if (by + boxH > H - 4) by = this.mouse.y - boxH - 14;
+    ctx.fillStyle = "rgba(2, 3, 10, 0.92)";
+    ctx.strokeStyle = "rgba(111, 209, 255, 0.55)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(bx, by, boxW, boxH);
+    ctx.strokeRect(bx, by, boxW, boxH);
+    ctx.textAlign = "left";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i === 0 ? "#6fd1ff" : "#d6e0f0";
+      ctx.fillText(lines[i], bx + pad, by + pad + 10 + i * 14);
     }
   }
 
@@ -1227,7 +1313,8 @@ class Game {
       const card = document.createElement("button");
       const locked = m.id > this.unlocked;
       card.className = "mission-card" + (locked ? " locked" : "") + (m.id === this.mission.id ? " current" : "");
-      const goalText = m.endless ? "Endless — survive as long as you can" : `Goal: ${m.goal} minerals`;
+      let goalText = m.endless ? "Endless — survive as long as you can" : `Goal: ${m.goal} minerals`;
+      if (m.endless && this.bestEndlessWave > 0) goalText += ` · Best: wave ${this.bestEndlessWave}`;
       card.innerHTML = `
         <span class="m-id">${m.endless ? "∞" : "M" + m.id}</span>
         <span class="m-name">${m.name.replace(/^Mission \d+:\s*|^Endless:\s*/, "")}</span>

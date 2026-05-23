@@ -4,6 +4,26 @@ Running log of changes. Newest at the top. Survives context resets.
 
 ## 2026-05-22
 
+### Session 1, batch 8 — hover tooltips + endless high score
+
+- Canvas-rendered hover tooltips for buildings, enemies, and minerals.
+  Tooltip auto-flips when it would clip a canvas edge. Surfaces the live
+  effective rate of miners and turrets including booster stacks and
+  tech buffs (so the player can read what each building is actually
+  doing right now).
+- Endless high score (`bestEndlessWave`) persisted to localStorage.
+  Updated on endless-mode loss; surfaced as "Best: wave N" on the
+  Endless card in the mission panel.
+
+### Session 1, batch 7 — shortcuts + endless + help + HUD counter
+
+- Endless mode as Mission 4 — unlocks after winning M3, no goal, the
+  banner stat slot becomes "Wave N · X mined".
+- Keyboard shortcuts: C/D/T/L/B/X for build modes; 1/2/3/4 for speeds;
+  W skip wave; R research; M mute; H help; Esc cancel-or-close.
+- Help panel (`?` button or H) with three-column glossary.
+- HUD "Field: X" — total remaining minerals on the map.
+
 ### Session 1, batch 6 — missions + save + end-of-mission stats
 
 - **Three-mission campaign** with `MISSIONS` data: Outpost (1500 goal),

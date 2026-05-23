@@ -40,19 +40,23 @@ Lives here so it survives context resets.
 
 - No mobile/touch input support.
 - No volume control (only mute toggle).
-- Mineral hover tooltips would help; right now you have to read tiny numbers near each rock.
-- Turret/Miner UI doesn't surface their current boosted rate visually.
-- Only 3 missions. No randomized "endless" mode.
+- No drag-place for connectors (one click each).
+- No minimap, single 1024×640 map only.
 
 ## Open ideas (in rough priority)
 
-1. Endless mode (mission 4) — no goal, see how many waves you survive
-2. Hover tooltips on buildings showing current effective rate and boost stacks
+1. Drag-place: hold-shift-and-drag to place many connectors in a line
+2. Mineral cluster visual when a miner is hovered (highlight the cluster being mined)
 3. Volume slider + audio mix tuning (some sounds are louder than necessary)
-4. Mineral aggregate UI: total remaining minerals on map shown in HUD
+4. Multiple map layouts per mission (asymmetric, choke-pointed)
 5. Mobile/touch layout
-6. Stretch: keyboard shortcuts for build modes (C/M/T/L/B/S)
-7. Stretch: drag-place buildings (build many connectors at once)
+6. Possibly: a 5th enemy type — a sniper that picks off the farthest networked building from edge of map
+
+## Stopping point
+
+Hit reasonable parity with the Flash version's core gameplay loop in 7 batches.
+Original Flash content beyond this scope: multiplayer, asset-based sound and
+sprites, multiple campaign trees, more upgrade depth.
 
 ## Notes
 
