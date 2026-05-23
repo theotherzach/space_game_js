@@ -1062,6 +1062,7 @@ class Game {
     this.ships = [];
     this.rockets = [];
     this.particles = [];
+    this.energyFlashes = [];
     this.minerals = this.level.minerals;
     this.totalMined = 0;
     this.goal = this.level.computeGoalFromField
@@ -1406,18 +1407,28 @@ class Game {
   }
 
   // Walk consumer's `mines` (shallowest first) and drain energy from producers.
+  // Records the path taken so the next draw() can briefly render it (source
+  // does this via `mcRelayLines.createEmptyMovieClip` in requestEnergy).
   requestEnergy(node, needs) {
     if (needs <= 0) return 0;
     let got = 0;
+    let drawnFor = null;
     for (const m of node.mines) {
       const src = m.mine;
       if (!src || src.dead || src.construction < src.constructionTarget) continue;
+      if (src.energy <= 0) continue;
       const take = Math.min(src.energy, needs - got);
       if (take > 0) {
         src.energy -= take;
         got += take;
+        if (!drawnFor) drawnFor = m;     // remember the path used
       }
       if (got >= needs) break;
+    }
+    if (drawnFor && this.energyFlashes) {
+      this.energyFlashes.push({
+        from: node, path: drawnFor.path, source: drawnFor.mine, life: 4,
+      });
     }
     return got;
   }
@@ -1460,6 +1471,9 @@ class Game {
       p.life -= 1 / TPS;
     }
     this.particles = this.particles.filter(p => p.life > 0);
+    // energy-flow flashes
+    for (const f of this.energyFlashes) f.life -= 1;
+    this.energyFlashes = this.energyFlashes.filter(f => f.life > 0);
     // wave timer — fire every entry whose delay has elapsed (mirrors how
     // the source rapidly dispatches the 6 same-delay slots in a round)
     while (!this.over
@@ -1540,6 +1554,19 @@ class Game {
       ctx.globalAlpha = a;
       ctx.fillStyle = "#ff8844";
       ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+
+    // energy-flow flashes: source renders these briefly when a consumer pulls
+    for (const f of this.energyFlashes) {
+      ctx.globalAlpha = clamp(f.life / 4, 0, 1);
+      ctx.strokeStyle = "#4dd6ff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(f.from.x, f.from.y);
+      for (const n of f.path) ctx.lineTo(n.x + rand(-2, 2), n.y + rand(-2, 2));
+      ctx.lineTo(f.source.x, f.source.y);
+      ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
