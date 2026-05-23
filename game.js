@@ -786,10 +786,10 @@ class Store extends Building {
       }
       return;
     }
-    // pull excess energy from the network until full
+    // Source buildingStore.tick: every 20 frames, top off the buffer
     this.tickStep -= 1;
     if (this.tickStep <= 0) {
-      this.tickStep = 4;
+      this.tickStep = 20;
       if (this.energy < this.maxEnergy) {
         this.energy += game.requestEnergy(this, this.maxEnergy - this.energy);
         if (this.energy > this.maxEnergy) this.energy = this.maxEnergy;
