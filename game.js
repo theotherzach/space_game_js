@@ -835,7 +835,7 @@ class Ship extends Entity {
     this.fireGap = stats.fireGap;
     this.target = null;
     this.spawnedSwarmers = false;
-    this.spawnCooldown = 0;
+    this.spawnCooldown = 300;     // motherships hold their swarm for ~10s after spawning
   }
   tick(game) {
     if (!this.target || this.target.dead) {
@@ -991,6 +991,7 @@ class Game {
     for (const btn of document.querySelectorAll("#missions button[data-level]")) {
       btn.addEventListener("click", () => this.reset(parseInt(btn.dataset.level, 10)));
     }
+    document.getElementById("send-wave").addEventListener("click", () => this.skipToNextWave());
     const mute = document.getElementById("mute");
     if (mute) mute.addEventListener("click", () => {
       Sfx.setEnabled(!Sfx.enabled);
@@ -1097,18 +1098,20 @@ class Game {
 
   // Wave generator ports the Easy/Normal/Hard formulas from levels.as.
   // Each wave = { delay (ticks from sim start), kind, count, hp, damage, angle }.
+  // Wave list ported from `levels.as`. Each entry stores an *absolute*
+  // delay in seconds; within a round the six slots all share the same
+  // delay and fire as a salvo (one entry per frame past the threshold).
   buildWaveList(level) {
     const list = [];
     let w = 1, slot = 1;
-    let acc = 0;
-    while (w < 100) {
-      let count = w * (level.id === 3 ? (level.countMul || 8) : 5) + (level.countOffset || 0);
-      if (level.id === 3) count = w * 8 + 7;
-      else count = w * (level.id === 2 ? 6 : 5);
+    while (w < 50) {
+      let count;
+      if (level.id === 3) count = 7 + w * 8;
+      else if (level.id === 2) count = w * 6;
+      else count = w * 5;
       if (count > level.countCap) count = level.countCap;
       const damage = Math.min(6, Math.floor(0.8 + w / level.damageDiv));
       let hp = w * level.hpBase;
-      // per-subType modifiers
       if (slot === 2) { count = count / 1.5; hp = hp * 2; }
       if (slot === 3) { count = count / 2;   hp = hp * 2; }
       if (slot === 4) { count = count / 2;   hp = hp / 2; }
@@ -1123,10 +1126,8 @@ class Game {
         else if (level.id === 2) { count = 5; hp = 180; }
         else { count = 3; hp = 90; }
       }
-      const delay = w * level.waveDelayMult + 10;
-      acc += delay;
       list.push({
-        delay: acc / TPS,           // convert source ticks to sim seconds
+        delay: w * level.waveDelayMult + 10,    // absolute seconds from start
         kind: SHIP_KIND_BY_SUBTYPE[slot] || "fighter",
         count: Math.max(1, Math.floor(count)),
         hp,
@@ -1137,6 +1138,19 @@ class Game {
       if (slot > 6) { slot = 1; w += 1; }
     }
     return list;
+  }
+
+  // Bring the next wave forward. No-op if no more waves or game over.
+  skipToNextWave() {
+    if (this.over) return;
+    const next = this.waveList[this.nextWaveTickIndex];
+    if (!next) return;
+    // shift all remaining waves so the next one fires in 0.5s
+    const offset = next.delay - (this.time + 0.5);
+    if (offset <= 0) return;
+    for (let i = this.nextWaveTickIndex; i < this.waveList.length; i++) {
+      this.waveList[i].delay -= offset;
+    }
   }
 
   // Pop the next wave-list entry, spawn its ships at the level's spawn radius.
@@ -1249,6 +1263,7 @@ class Game {
       const mb = document.getElementById("mute");
       if (mb) mb.textContent = Sfx.enabled ? "🔊" : "🔇";
     }
+    else if (k === "v") this.skipToNextWave();
   }
 
   // ---- building & network ----
@@ -1383,11 +1398,9 @@ class Game {
   loop(t) {
     const dt_real = Math.min(0.1, (t - this.last) / 1000);
     this.last = t;
-    // smooth zoom toward target
     if (Math.abs(this.camera.scale - this.camera.targetScale) > 0.001) {
       this.camera.scale += (this.camera.targetScale - this.camera.scale) * Math.min(1, dt_real * 12);
     }
-    // tick the sim at fixed rate, multiplied by speed
     if (!this.over) {
       this.tickAcc += dt_real * this.speed * TPS;
       while (this.tickAcc >= 1) {
@@ -1395,13 +1408,13 @@ class Game {
         this.tickAcc -= 1;
       }
     }
-    this.time += dt_real * this.speed;
     this.draw();
     requestAnimationFrame(tt => this.loop(tt));
   }
 
   tick() {
     this.tickCount += 1;
+    this.time += 1 / TPS;
     for (const b of this.buildings) {
       if (b.dead) continue;
       b.tick(this);
@@ -1419,8 +1432,13 @@ class Game {
       p.life -= 1 / TPS;
     }
     this.particles = this.particles.filter(p => p.life > 0);
-    // wave timer
-    if (this.time >= this.nextWaveAt && !this.over) this.spawnWave();
+    // wave timer — fire every entry whose delay has elapsed (mirrors how
+    // the source rapidly dispatches the 6 same-delay slots in a round)
+    while (!this.over
+      && this.nextWaveTickIndex < this.waveList.length
+      && this.time >= this.waveList[this.nextWaveTickIndex].delay) {
+      this.spawnWave();
+    }
     // dirty path if any building just finished construction
     let wasDirty = false;
     for (const b of this.buildings) {
@@ -1521,12 +1539,13 @@ class Game {
     ctx.restore();
 
     // wave countdown text overlay (in screen space)
-    if (!this.over && this.ships.length === 0) {
-      const t = Math.max(0, this.nextWaveAt - this.time);
+    const next = this.waveList?.[this.nextWaveTickIndex];
+    if (!this.over && next) {
+      const t = Math.max(0, next.delay - this.time);
       ctx.fillStyle = "rgba(255, 220, 120, 0.75)";
       ctx.font = "13px monospace";
       ctx.textAlign = "center";
-      ctx.fillText(`Wave ${this.waveNumber + 1} in ${t.toFixed(1)}s`, W / 2, 22);
+      ctx.fillText(`Next: ${next.count}× ${next.kind} in ${t.toFixed(1)}s — V to send`, W / 2, 22);
     }
     if (this.over) {
       ctx.fillStyle = this.over === "win" ? "rgba(107, 217, 107, 0.95)" : "rgba(255, 116, 102, 0.95)";
