@@ -32,6 +32,16 @@
 
 <canvas id="game" width="1024" height="640"></canvas>
 
+<div id="selection" class="hidden">
+  <button id="sel-close" title="Close (Esc)">×</button>
+  <div id="sel-name">—</div>
+  <div id="sel-stats">—</div>
+  <div id="sel-actions">
+    <button id="sel-upgrade">Upgrade</button>
+    <button id="sel-sell">Sell</button>
+  </div>
+</div>
+
 <div id="build">
   <button data-build="relay" title="Relay (1) — 20 min."><b>Relay</b><span class="cost">20 <em>1</em></span></button>
   <button data-build="miner" title="Miner (2) — 45 min."><b>Miner</b><span class="cost">45 <em>2</em></span></button>

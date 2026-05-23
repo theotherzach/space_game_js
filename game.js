@@ -175,6 +175,25 @@ class Building extends Entity {
     this.justFinished = true;
     Sfx.play("built");
   }
+  // Per-building upgrade — subclass overrides applyUpgrade().
+  // Source pattern: upgrade increases _targetConstruction so the building
+  // briefly returns to construction state before the new level kicks in.
+  canUpgrade(game) {
+    return this.upgradesRemaining > 0
+      && this.construction >= this.constructionTarget
+      && game.minerals >= this.upgradeCost;
+  }
+  doUpgrade(game) {
+    if (!this.canUpgrade(game)) return false;
+    game.minerals -= this.upgradeCost;
+    this.value += this.upgradeCost / 2;
+    this.upgradesRemaining -= 1;
+    this.upgradeLevel += 1;
+    this.applyUpgrade();
+    this.constructionTarget += 5;     // mirror source: must re-build to new level
+    return true;
+  }
+  applyUpgrade() { /* override */ }
 }
 
 // buildingRelay: 100 HP, range 90, forwards energy, can't generate.
@@ -183,6 +202,8 @@ class Relay extends Building {
     super(x, y, "relay", RELAY_HP, COSTS.relay);
     this.size = 8;
     this.relayEnergy = true;
+    this.upgradesRemaining = 0;       // source: relay can't be upgraded
+    this.upgradeCost = 0;
   }
   // source buildingRelay.tick: every frame, request 1 energy, if got>=0.5 add 2 construction
   tick(game) {
@@ -213,6 +234,15 @@ class EnergyGen extends Building {
     this.tickStep = 0;
     this.relayEnergy = true;
     this.totalEnergy = 0;
+    this.upgradesRemaining = 2;       // source: 2 upgrades, $200 each
+    this.upgradeCost = 200;
+  }
+  applyUpgrade() {
+    // matches buildingEnergy.upgrade(): +5 maxEnergy, +200 HP, eff 0.7→1.0
+    this.maxEnergy += 5;
+    this.hp += 200;
+    this.maxHp += 200;
+    this.efficiency = this.upgradeLevel === 2 ? 0.7 : 1.0;
   }
   // source buildingEnergy.tick: every constructionTick frames, request 1 energy to build;
   // when fully built, generate 3*efficiency every ENERGY_TICK_STEP frames.
@@ -264,12 +294,20 @@ class Miner extends Building {
     this.maxEnergy = MINER_MAX_ENERGY;
     this.mineRange = MINE_RANGE;
     this.mineRate = MINE_RATE;
-    this.mineTicker = MINE_RATE;     // starts full so first pulse fires immediately
+    this.mineTicker = MINE_RATE;
     this.mineQuantity = MINER_QUANTITY;
     this.totalMined = 0;
-    this.minedOK = true;             // false → low-energy indicator on
-    this.planets = [];               // nearby asteroids
-    this.laser = null;               // {tx, ty, alpha} of last pulse, for visual
+    this.minedOK = true;
+    this.planets = [];
+    this.laser = null;
+    this.upgradesRemaining = 1;        // source: 1 upgrade at $100
+    this.upgradeCost = 100;
+  }
+  applyUpgrade() {
+    // matches buildingMiner.upgrade(): mineQuantity 4→10, +200 HP
+    this.mineQuantity = 10;
+    this.hp += 200;
+    this.maxHp += 200;
   }
   refreshPlanets(game) {
     this.planets = game.asteroids.filter(a => !a.dead && dist(this, a) < this.mineRange);
@@ -382,10 +420,20 @@ class LaserTurret extends Building {
     this.energyNeeded = LASER_ENERGY_NEEDED;
     this.maxEnergy = this.energyNeeded;  // we keep a small energy buffer
     this.attackDamage = LASER_DAMAGE;
-    this.attack = null;     // current target ship
-    this.beam = null;       // {tx, ty, life}
+    this.attack = null;
+    this.beam = null;
     this.tickStep = 1;
     this.constructionTick = 15;
+    this.upgradesRemaining = 2;       // source: 2 standard upgrades
+    this.upgradeCost = 150;           // L2 cost from source
+  }
+  applyUpgrade() {
+    // matches buildingLaser.upgrade() L2: damage 30→42, +100 HP
+    // L3: damage 42→55, +100 HP
+    this.attackDamage += 12;
+    this.hp += 100;
+    this.maxHp += 100;
+    this.upgradeCost = 300;
   }
   tick(game) {
     if (this.construction < this.constructionTarget) {
@@ -473,6 +521,16 @@ class RocketTurret extends Building {
     this.maxEnergy = ROCKET_MAX_ENERGY;
     this.tickStep = 4;
     this.constructionTick = 15;
+    this.upgradesRemaining = 2;
+    this.upgradeCost = 500;
+  }
+  applyUpgrade() {
+    // matches buildingRocket: +50 damage per level, +200 HP
+    this.attackDamage += 50;
+    this.hp += 200;
+    this.maxHp += 200;
+    if (this.upgradeLevel === 2) this.rockets = 2;
+    if (this.upgradeLevel === 3) this.rockets = 3;
   }
   tick(game) {
     if (this.construction < this.constructionTarget) {
@@ -597,24 +655,37 @@ class Rocket {
   }
 }
 
-// Ship base (enemy). Sub-classes set their stats.
+// Ship base (enemy). Each shipKind tunes stats and visual.
+// Stats interpreted from ship1..ship6 in /tmp/v83_deob/scripts/__Packages/.
+const SHIP_STATS = {
+  fighter:  { hp: 100, speed: 1.1, damage: 8,   fireRange: 70,  fireGap: 50,  size: 8,  color: "#ff3030", fill: "#3a0a0a" },
+  missile:  { hp:  80, speed: 0.9, damage: 6,   fireRange: 200, fireGap: 70,  size: 8,  color: "#66ff00", fill: "#1a3308" },
+  exploder: { hp:  60, speed: 1.8, damage: 40,  fireRange: 0,   fireGap: 1,   size: 8,  color: "#ff6600", fill: "#33180a", suicide: true },
+  ring:     { hp: 200, speed: 1.4, damage: 10,  fireRange: 60,  fireGap: 60,  size: 11, color: "#ffff00", fill: "#332e08" },
+  swarmer:  { hp:  35, speed: 2.4, damage: 4,   fireRange: 70,  fireGap: 40,  size: 5,  color: "#cccccc", fill: "#222222" },
+  mother:   { hp: 600, speed: 0.6, damage: 12,  fireRange: 200, fireGap: 90,  size: 22, color: "#ff00ff", fill: "#330033", spawnsSwarmers: true },
+};
 class Ship extends Entity {
-  constructor(x, y, hp, speed, damage, fireRange, kind = "fighter") {
-    super(x, y, hp);
+  constructor(x, y, kind = "fighter", waveScale = 1) {
+    const stats = SHIP_STATS[kind] || SHIP_STATS.fighter;
+    super(x, y, stats.hp * waveScale);
     this.kind = "ship";
     this.shipKind = kind;
-    this.size = 8;
-    this.maxSpeed = speed;
-    this.speed = speed;
-    this.attackDamage = damage;
-    this.fireRange = fireRange;
-    this.fireStep = 50;
-    this.target = null;        // current building target
-    this.attackCd = 0;
+    this.stats = stats;
+    this.size = stats.size;
+    this.maxSpeed = stats.speed * (0.9 + Math.random() * 0.2);
+    this.speed = this.maxSpeed;
+    this.attackDamage = stats.damage * waveScale;
+    this.fireRange = stats.fireRange;
+    this.fireStep = stats.fireGap;
+    this.fireGap = stats.fireGap;
+    this.target = null;
+    this.spawnedSwarmers = false;
+    this.spawnCooldown = 0;
   }
   tick(game) {
-    // pick a target — closest building (matches source heuristic for ship1)
     if (!this.target || this.target.dead) {
+      // mother ship targets the deepest networked building; others target nearest
       let best = null, bestD = Infinity;
       for (const b of game.buildings) {
         if (b.dead) continue;
@@ -627,31 +698,88 @@ class Ship extends Entity {
     const dx = this.target.x - this.x;
     const dy = this.target.y - this.y;
     const d = Math.hypot(dx, dy);
+    if (this.stats.suicide) {
+      // exploder: closes distance and detonates AOE
+      if (d > 12) {
+        this.x += (dx / d) * this.speed;
+        this.y += (dy / d) * this.speed;
+      } else {
+        // AOE damage to all nearby buildings
+        for (const b of game.buildings) {
+          if (b.dead) continue;
+          const bd = dist(this, b);
+          if (bd < 60) b.damage(this.attackDamage * (1 - bd / 60));
+        }
+        explode(game, this.x, this.y);
+        this.dead = true;
+        Sfx.play("death");
+      }
+      return;
+    }
+    if (this.stats.spawnsSwarmers) {
+      this.spawnCooldown -= 1;
+      if (this.spawnCooldown <= 0) {
+        for (let i = 0; i < 2; i++) {
+          const a = Math.random() * Math.PI * 2;
+          game.ships.push(new Ship(this.x + Math.cos(a) * 30, this.y + Math.sin(a) * 30, "swarmer"));
+        }
+        this.spawnCooldown = 300;     // every ~10 sim seconds
+      }
+    }
     if (d > this.fireRange) {
       this.x += (dx / d) * this.speed;
       this.y += (dy / d) * this.speed;
     } else {
-      // in range: fire on cooldown
       this.fireStep -= 1;
       if (this.fireStep <= 0) {
         this.target.damage(this.attackDamage);
-        this.fireStep = 50;
+        this.fireStep = this.fireGap;
         Sfx.play("hit");
       }
     }
   }
   draw(ctx) {
-    ctx.fillStyle = "#3a0a0a";
-    ctx.strokeStyle = "#ff5d4d";
-    ctx.lineWidth = 1.5;
     const r = this.size;
-    ctx.beginPath();
-    ctx.moveTo(this.x + r, this.y);
-    ctx.lineTo(this.x - r * 0.6, this.y - r * 0.7);
-    ctx.lineTo(this.x - r * 0.6, this.y + r * 0.7);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    if (this.hp < this.maxHp) drawHpBar(ctx, this, 14);
+    ctx.fillStyle = this.stats.fill;
+    ctx.strokeStyle = this.stats.color;
+    ctx.lineWidth = 1.5;
+    if (this.shipKind === "ring") {
+      // ring: outer circle with inner hollow
+      ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(this.x, this.y, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+    } else if (this.shipKind === "exploder") {
+      // diamond + pulsing core
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y - r);
+      ctx.lineTo(this.x + r, this.y);
+      ctx.lineTo(this.x, this.y + r);
+      ctx.lineTo(this.x - r, this.y);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    } else if (this.shipKind === "mother") {
+      // large hex
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3;
+        const px = this.x + Math.cos(a) * r;
+        const py = this.y + Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      // tendrils
+      ctx.beginPath();
+      ctx.moveTo(this.x - r * 1.4, this.y); ctx.lineTo(this.x + r * 1.4, this.y);
+      ctx.moveTo(this.x, this.y - r * 1.4); ctx.lineTo(this.x, this.y + r * 1.4);
+      ctx.stroke();
+    } else {
+      // default triangle (fighter, missile, swarmer)
+      ctx.beginPath();
+      ctx.moveTo(this.x + r, this.y);
+      ctx.lineTo(this.x - r * 0.6, this.y - r * 0.7);
+      ctx.lineTo(this.x - r * 0.6, this.y + r * 0.7);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    }
+    if (this.hp < this.maxHp) drawHpBar(ctx, this, Math.max(14, r * 1.5));
   }
 }
 
@@ -715,9 +843,35 @@ class Game {
       btn.addEventListener("click", () => {
         const t = btn.dataset.build;
         this.placement = (t === "cancel" || this.placement === t) ? null : t;
+        this.selected = null;
         this.refreshBuildUI();
+        this.refreshSelectionPanel();
       });
     }
+    document.getElementById("sel-upgrade").addEventListener("click", () => {
+      if (this.selected && this.selected.doUpgrade(this)) {
+        this.refreshSelectionPanel();
+        this.refreshHud();
+        Sfx.play("built");
+      }
+    });
+    document.getElementById("sel-sell").addEventListener("click", () => {
+      if (!this.selected) return;
+      const b = this.selected;
+      if (this.buildings.length <= 1) return;
+      this.minerals += Math.round(b.value * SELL_REFUND);
+      b.dead = true;
+      this.buildings = this.buildings.filter(x => !x.dead);
+      this.recomputeLinks(); this.path();
+      this.selected = null;
+      this.refreshHud();
+      this.refreshSelectionPanel();
+      Sfx.play("sell");
+    });
+    document.getElementById("sel-close").addEventListener("click", () => {
+      this.selected = null;
+      this.refreshSelectionPanel();
+    });
     // ensure audio context starts on first interaction
     const ensureAudio = () => { Sfx.init(); Sfx.resume(); };
     canvas.addEventListener("pointerdown", ensureAudio, { once: true });
@@ -749,6 +903,7 @@ class Game {
     this.over = null;
     this.waveNumber = 0;
     this.nextWaveAt = 60;            // first wave at 60s sim time
+    this.selected = null;
     this.camera.x = 0; this.camera.y = 0; this.camera.scale = 1; this.camera.targetScale = 1;
     const eg = new EnergyGen(0, 0);
     eg.construction = eg.constructionTarget;
@@ -761,20 +916,31 @@ class Game {
     this.refreshHud();
   }
 
+  // Wave composition mirrors the source's waveBar messages: fighters first,
+  // missiles by wave 2, exploders by 3, ring ships by 4, swarmers by 5,
+  // motherships from wave 7.
   spawnWave() {
     this.waveNumber += 1;
-    const count = 3 + this.waveNumber * 2;
-    for (let i = 0; i < count; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 600;
-      const sx = Math.cos(a) * r;
-      const sy = Math.sin(a) * r;
-      const hp = SHIP_FIGHTER_HP * (1 + (this.waveNumber - 1) * 0.25);
-      const speed = (0.8 + Math.random() * 0.3) * 1.6;   // px per tick * scale to look right
-      const dmg = SHIP_FIGHTER_DAMAGE * (1 + (this.waveNumber - 1) * 0.15);
-      this.ships.push(new Ship(sx, sy, hp, speed, dmg, 70, "fighter"));
+    const w = this.waveNumber;
+    const waveScale = 1 + (w - 1) * 0.15;
+    const counts = {
+      fighter:  3 + w,
+      missile:  w >= 2 ? 1 + Math.floor((w - 1) / 2) : 0,
+      exploder: w >= 3 ? 1 + Math.floor((w - 3) / 3) : 0,
+      ring:     w >= 4 ? Math.floor((w - 2) / 2) : 0,
+      swarmer:  w >= 5 ? 2 + Math.floor((w - 5) / 2) : 0,
+      mother:   w >= 7 && (w - 7) % 3 === 0 ? 1 : 0,
+    };
+    for (const [kind, count] of Object.entries(counts)) {
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = 600;
+        const sx = Math.cos(a) * r;
+        const sy = Math.sin(a) * r;
+        this.ships.push(new Ship(sx, sy, kind, waveScale));
+      }
     }
-    this.nextWaveAt = this.time + 45 + this.waveNumber * 6;
+    this.nextWaveAt = this.time + 45 + w * 6;
     Sfx.play("wave");
   }
 
@@ -820,14 +986,21 @@ class Game {
       this.dragging = { sx: this.mouse.sx, sy: this.mouse.sy, camX: this.camera.x, camY: this.camera.y };
       return;
     }
-    // left + placement mode = build attempt
-    if (e.button === 0 && this.placement) {
+    if (e.button !== 0) return;
+    // placement mode = build attempt
+    if (this.placement) {
       const w = this.mouse;
       this.tryBuild(snap(w.wx), snap(w.wy));
-      if (!e.shiftKey) {
-        // single-shot placement unless shift held (mirrors AS2 shift-build chain)
-      }
+      return;
     }
+    // otherwise: select the building under the cursor (or clear)
+    let hit = null;
+    for (const b of this.buildings) {
+      if (b.dead) continue;
+      if (dist({ x: this.mouse.wx, y: this.mouse.wy }, b) <= b.size + 3) { hit = b; break; }
+    }
+    this.selected = hit;
+    this.refreshSelectionPanel();
   }
   onMouseUp() { this.dragging = null; }
   onWheel(e) {
@@ -1043,9 +1216,11 @@ class Game {
     }
     // win / lose
     if (this.totalMined >= this.goal) { this.over = "win"; Sfx.play("win"); }
-    // lose if all buildings are gone (no recovery possible)
     if (this.buildings.length === 0) { this.over = "lose"; Sfx.play("lose"); }
+    // if the selected building died, clear selection
+    if (this.selected && this.selected.dead) this.selected = null;
     this.refreshHud();
+    if (this.selected) this.refreshSelectionPanel();
   }
 
   // ---- drawing ----
@@ -1096,6 +1271,27 @@ class Game {
 
     // placement preview
     if (this.placement && this.mouse.in) this.drawPlacementPreview(ctx);
+
+    // selection indicator
+    if (this.selected && !this.selected.dead) {
+      const b = this.selected;
+      ctx.strokeStyle = "rgba(111, 209, 255, 0.95)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.size + 6, 0, Math.PI * 2); ctx.stroke();
+      // fire/energy ranges where relevant
+      ctx.strokeStyle = "rgba(111, 209, 255, 0.2)";
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.energyRange, 0, Math.PI * 2); ctx.stroke();
+      if (b.type === "laser" || b.type === "rocket") {
+        ctx.strokeStyle = "rgba(255, 116, 102, 0.3)";
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.fireRange, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (b.type === "miner") {
+        ctx.strokeStyle = "rgba(240, 193, 75, 0.3)";
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.mineRange, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
 
     ctx.restore();
 
@@ -1176,6 +1372,38 @@ class Game {
     for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
       btn.classList.toggle("active", parseFloat(btn.dataset.speed) === this.speed);
     }
+  }
+  refreshSelectionPanel() {
+    const panel = document.getElementById("selection");
+    if (!panel) return;
+    const b = this.selected;
+    if (!b || b.dead) { panel.classList.add("hidden"); return; }
+    panel.classList.remove("hidden");
+    const name = b.type === "energy" ? "Energy Generator"
+      : b.type === "miner" ? "Miner"
+      : b.type === "relay" ? "Relay"
+      : b.type === "laser" ? "Laser Turret"
+      : b.type === "rocket" ? "Rocket Turret"
+      : b.type;
+    const stats = [];
+    stats.push(`HP ${Math.ceil(b.hp)}/${Math.ceil(b.maxHp)}`);
+    stats.push(`Level ${b.upgradeLevel}`);
+    if (b.type === "miner") stats.push(`Mines ${b.mineQuantity} per pulse`);
+    if (b.type === "energy") stats.push(`Output ${(3 * b.efficiency).toFixed(2)}/tick · cap ${b.maxEnergy}`);
+    if (b.type === "laser") stats.push(`Dmg ${b.attackDamage.toFixed(0)} · range ${b.fireRange}`);
+    if (b.type === "rocket") stats.push(`Dmg ${b.attackDamage.toFixed(0)} · ×${b.rockets} per burst`);
+    panel.querySelector("#sel-name").textContent = name;
+    panel.querySelector("#sel-stats").textContent = stats.join(" · ");
+    const btn = panel.querySelector("#sel-upgrade");
+    const sellBtn = panel.querySelector("#sel-sell");
+    if (b.upgradesRemaining > 0) {
+      btn.style.display = "";
+      btn.disabled = !b.canUpgrade(this);
+      btn.textContent = `Upgrade for ${b.upgradeCost} min.`;
+    } else {
+      btn.style.display = "none";
+    }
+    sellBtn.textContent = `Sell (refund ${Math.round(b.value * SELL_REFUND)})`;
   }
 }
 
