@@ -90,6 +90,9 @@ body {
 #build button b { color: var(--text); font-weight: 600; }
 #build button .cost { color: var(--gold); font-size: 11px; }
 #build button.cancel { color: var(--warn); }
+#build button.sell { color: var(--gold); }
+#build button.sell.active { background: var(--gold); color: #06070d; border-color: var(--gold); }
+#build button.sell.active b, #build button.sell.active .cost { color: #06070d; }
 #build button.active { background: var(--accent); color: #06070d; border-color: var(--accent); }
 #build button.active b, #build button.active .cost { color: #06070d; }
 #build button.disabled { opacity: 0.4; cursor: not-allowed; }

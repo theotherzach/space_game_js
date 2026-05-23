@@ -5,6 +5,7 @@ const W = 1024;
 const H = 640;
 
 const COSTS = { connector: 15, miner: 40, turret: 60 };
+const SELL_REFUND = 0.6;        // 60% of build cost refunded on demolish
 
 // Base values — research multiplies these. See computeTech() below.
 const BASE_TECH = Object.freeze({
@@ -81,10 +82,15 @@ class Entity {
     this.maxHp = hp;
     this.hp = hp;
     this.dead = false;
+    this.flash = 0;             // seconds remaining on damage flash
   }
   damage(dmg) {
     this.hp -= dmg;
+    this.flash = 0.12;
     if (this.hp <= 0) this.dead = true;
+  }
+  tickFlash(dt) {
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dt);
   }
   applyHpMult(mult) {
     const ratio = this.maxHp > 0 ? this.hp / this.maxHp : 1;
@@ -232,12 +238,12 @@ class Mineral extends Entity {
 }
 
 class Enemy extends Entity {
-  constructor(x, y, hp, speed, damage, value) {
+  constructor(x, y, hp, speed, damage, value, kind = "raider") {
     super(x, y, hp);
-    this.radius = 7;
-    this.kind = "enemy";
+    this.radius = kind === "scout" ? 5 : 7;
+    this.kind = kind;            // "raider" (default) or "scout"
     this.speed = speed;
-    this.damage = damage;
+    this.attackDamage = damage;  // NOT `damage` — that would shadow Entity.damage()
     this.value = value;
     this.attackCd = 0;
     this.target = null;
@@ -264,26 +270,75 @@ class Enemy extends Entity {
     } else {
       this.attackCd -= dt;
       if (this.attackCd <= 0) {
-        t.damage(this.damage);
+        t.damage(this.attackDamage);
         this.attackCd = 0.6;
       }
     }
   }
   draw(ctx) {
-    ctx.fillStyle = "#7a1818";
-    ctx.strokeStyle = "#ff5d4d";
+    if (this.kind === "scout") {
+      ctx.fillStyle = "#5a2a8a";
+      ctx.strokeStyle = "#c884ff";
+    } else {
+      ctx.fillStyle = "#7a1818";
+      ctx.strokeStyle = "#ff5d4d";
+    }
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(this.x + this.radius, this.y);
-    for (let i = 1; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      ctx.lineTo(this.x + Math.cos(a) * this.radius, this.y + Math.sin(a) * this.radius);
+    const sides = this.kind === "scout" ? 3 : 6;
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2 - Math.PI / 2;
+      const px = this.x + Math.cos(a) * this.radius;
+      const py = this.y + Math.sin(a) * this.radius;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    drawHpBar(ctx, this, 11);
+    drawHpBar(ctx, this, this.kind === "scout" ? 9 : 11);
   }
+}
+
+class Particle {
+  constructor(x, y, color) {
+    this.x = x; this.y = y;
+    const a = Math.random() * Math.PI * 2;
+    const s = rand(40, 160);
+    this.vx = Math.cos(a) * s;
+    this.vy = Math.sin(a) * s;
+    this.life = rand(0.35, 0.7);
+    this.maxLife = this.life;
+    this.color = color;
+    this.size = rand(1.4, 2.6);
+    this.dead = false;
+  }
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.vx *= 0.92;
+    this.vy *= 0.92;
+    this.life -= dt;
+    if (this.life <= 0) this.dead = true;
+  }
+  draw(ctx) {
+    ctx.globalAlpha = clamp(this.life / this.maxLife, 0, 1);
+    ctx.fillStyle = this.color;
+    ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function explode(game, x, y, color, count = 10) {
+  for (let i = 0; i < count; i++) game.particles.push(new Particle(x, y, color));
+}
+
+function drawFlashOverlay(ctx, e) {
+  if (!e.flash || e.flash <= 0) return;
+  const a = e.flash / 0.12;
+  ctx.globalAlpha = a * 0.7;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(e.x, e.y, (e.radius || 6) + 1, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
 }
 
 class Bullet {
@@ -401,6 +456,7 @@ class Game {
     this.minerals = this.spawnMinerals();
     this.enemies = [];
     this.bullets = [];
+    this.particles = [];
     this.minerals_stored = STARTING_MINERALS;
     this.minerals_collected = 0;
     this.recent_mined = 0;
@@ -466,7 +522,25 @@ class Game {
     const r = this.canvas.getBoundingClientRect();
     const x = (e.clientX - r.left) * (W / r.width);
     const y = (e.clientY - r.top) * (H / r.height);
-    this.tryBuild(x, y);
+    if (this.placement === "sell") this.trySell(x, y);
+    else this.tryBuild(x, y);
+  }
+
+  trySell(x, y) {
+    // find a non-base building under the click
+    let hit = null;
+    for (const b of this.buildings) {
+      if (b.dead || b.kind === "base") continue;
+      if (dist({ x, y }, b) <= (b.radius || 8) + 3) { hit = b; break; }
+    }
+    if (!hit) return;
+    const cost = COSTS[hit.kind] || 0;
+    this.minerals_stored += Math.round(cost * SELL_REFUND);
+    hit.dead = true;
+    explode(this, hit.x, hit.y, "#f0c14b", 10);
+    this.buildings = this.buildings.filter(b => !b.dead);
+    this.recomputeNetwork();
+    this.refreshHud();
   }
 
   tryBuild(x, y) {
@@ -505,20 +579,31 @@ class Game {
 
   spawnWave() {
     this.wave_number += 1;
-    const n = 2 + this.wave_number;
-    const hp = 18 + this.wave_number * 8;
-    const speed = 30 + this.wave_number * 2;
-    for (let i = 0; i < n; i++) {
-      // spawn from a random edge
+    const w = this.wave_number;
+    const raiders = 2 + w;
+    const scouts = w >= 2 ? Math.floor((w - 1) / 2) + 1 : 0;   // scouts start wave 2
+    const raiderHp = 18 + w * 8;
+    const raiderSpeed = 30 + w * 2;
+    const raiderDmg = 4 + w;
+    const scoutHp = 8 + w * 3;
+    const scoutSpeed = 70 + w * 3;
+    const scoutDmg = 2 + Math.floor(w / 2);
+    const pickEdge = () => {
       const edge = Math.floor(Math.random() * 4);
-      let x, y;
-      if (edge === 0) { x = Math.random() * W; y = -10; }
-      else if (edge === 1) { x = W + 10; y = Math.random() * H; }
-      else if (edge === 2) { x = Math.random() * W; y = H + 10; }
-      else { x = -10; y = Math.random() * H; }
-      this.enemies.push(new Enemy(x, y, hp, speed, 4 + this.wave_number, 6));
+      if (edge === 0) return { x: Math.random() * W, y: -10 };
+      if (edge === 1) return { x: W + 10, y: Math.random() * H };
+      if (edge === 2) return { x: Math.random() * W, y: H + 10 };
+      return { x: -10, y: Math.random() * H };
+    };
+    for (let i = 0; i < raiders; i++) {
+      const p = pickEdge();
+      this.enemies.push(new Enemy(p.x, p.y, raiderHp, raiderSpeed, raiderDmg, 6, "raider"));
     }
-    this.next_wave = this.time + 20 + this.wave_number * 4;
+    for (let i = 0; i < scouts; i++) {
+      const p = pickEdge();
+      this.enemies.push(new Enemy(p.x, p.y, scoutHp, scoutSpeed, scoutDmg, 3, "scout"));
+    }
+    this.next_wave = this.time + 20 + w * 4;
   }
 
   loop(t) {
@@ -547,6 +632,14 @@ class Game {
       }
     }
 
+    // tick damage-flash timers
+    for (const b of this.buildings) b.tickFlash(dt);
+    for (const e of this.enemies) e.tickFlash(dt);
+
+    // particles
+    for (const p of this.particles) p.update(dt);
+    this.particles = this.particles.filter(p => !p.dead);
+
     // bullets
     for (const b of this.bullets) b.update(dt);
     this.bullets = this.bullets.filter(b => !b.dead);
@@ -557,16 +650,24 @@ class Game {
     // enemies
     for (const e of this.enemies) e.update(dt, this);
 
-    // cleanup deaths -> grant minerals for kills
+    // cleanup deaths -> grant minerals for kills, spawn particles
     const alive = [];
     for (const e of this.enemies) {
-      if (e.dead) this.minerals_stored += e.value;
-      else alive.push(e);
+      if (e.dead) {
+        this.minerals_stored += e.value;
+        explode(this, e.x, e.y, e.kind === "scout" ? "#c884ff" : "#ff5d4d", 12);
+      } else alive.push(e);
     }
     this.enemies = alive;
 
     // building deaths break network
     const before = this.buildings.length;
+    for (const b of this.buildings) {
+      if (b.dead) {
+        const c = b.kind === "turret" ? "#ff7466" : b.kind === "miner" ? "#f0c14b" : "#6fd1ff";
+        explode(this, b.x, b.y, c, 16);
+      }
+    }
     this.buildings = this.buildings.filter(b => !b.dead);
     if (this.buildings.length !== before) this.recomputeNetwork();
 
@@ -620,10 +721,14 @@ class Game {
     for (const m of this.minerals) m.draw(ctx);
     // buildings
     for (const b of this.buildings) b.draw(ctx);
+    for (const b of this.buildings) drawFlashOverlay(ctx, b);
     // enemies
     for (const e of this.enemies) e.draw(ctx);
+    for (const e of this.enemies) drawFlashOverlay(ctx, e);
     // bullets
     for (const b of this.bullets) b.draw(ctx);
+    // particles
+    for (const p of this.particles) p.draw(ctx);
 
     // placement preview
     if (this.placement && this.mouse.in) this.drawPlacementPreview(ctx);
@@ -640,8 +745,27 @@ class Game {
 
   drawPlacementPreview(ctx) {
     const kind = this.placement;
-    const cost = COSTS[kind];
     const x = this.mouse.x, y = this.mouse.y;
+    if (kind === "sell") {
+      // highlight the building under the cursor
+      let hit = null;
+      for (const b of this.buildings) {
+        if (b.dead || b.kind === "base") continue;
+        if (dist({ x, y }, b) <= (b.radius || 8) + 3) { hit = b; break; }
+      }
+      if (hit) {
+        ctx.strokeStyle = "rgba(240, 193, 75, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(hit.x, hit.y, (hit.radius || 8) + 4, 0, Math.PI * 2); ctx.stroke();
+        const refund = Math.round((COSTS[hit.kind] || 0) * SELL_REFUND);
+        ctx.fillStyle = "#f0c14b";
+        ctx.font = "11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`+${refund}`, hit.x, hit.y - (hit.radius || 8) - 8);
+      }
+      return;
+    }
+    const cost = COSTS[kind];
     const affordable = this.minerals_stored >= cost;
     let r = 10;
     if (kind === "connector") r = 8;
