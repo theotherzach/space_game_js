@@ -815,27 +815,43 @@ const REPAIR_RANGE = 200;
 const REPAIR_TICK = 80;          // frames between heal pulses
 const REPAIR_AMOUNT = 20;
 // buildingRepair. Source: _size=24, _life=400, _maxEnergy=5, _repairRange=200,
-// _targetTick=80, _constructionTick=15, _upgrades=1, _upgradeCost=150.
-// Source uses actual flying _repairBots (drones); my port uses an instant
-// beam for simplicity but with the source's 80-frame cadence.
+// _targetTick=80, _maxRepairBots=4, _constructionTick=15, _upgrades=1.
+// Source spawns flying repair drones (repair1) that fly to damaged neighbors,
+// fire a green healing laser, and return to base to recharge.
 class Repair extends Building {
   constructor(x, y) {
     super(x, y, "repair", REPAIR_HP, COSTS.repair);
     this.size = 24;                   // source _size
     this.maxEnergy = 5;               // source _maxEnergy
     this.repairRange = REPAIR_RANGE;
+    this.maxRepairBots = 4;           // source _maxRepairBots
+    this.repairBots = [];             // source _repairBots
+    this.targetTick = 0;              // source _targetTick countdown
+    this.shipConstructionStep = 0;    // source _shipConstructionStep
+    this.shipConstructionTick = 0;    // source _shipConstructionTick
     this.upgradesRemaining = 1;       // source _upgrades
     this.upgradeCost = 150;           // source _upgradeCost
-    this.tickStep = 0;
-    this.healTimer = REPAIR_TICK;
     this.constructionTick = 15;       // source _constructionTick
-    this.lastHealed = null;
-    this.lastHealTimer = 0;
   }
   applyUpgrade() {
-    this.repairRange += 50;
+    // source: +200 life, +100 repairRange, +10 targetConstruction, -2 ctTick
+    this.repairRange += 100;
     this.hp += 200;
     this.maxHp += 200;
+    this.constructionTick = Math.max(1, this.constructionTick - 2);
+  }
+  nextTarget(game) {
+    // Source: inMyCell(this, repairRange, enemy=0, count=4, false, true) —
+    // the trailing `true` filters to damaged player buildings only.
+    const out = [];
+    for (const b of game.buildings) {
+      if (b.dead || b === this) continue;
+      if (b.hp >= b.maxHp) continue;
+      const d = dist(this, b);
+      if (d <= this.repairRange) out.push({ node: b, d });
+    }
+    out.sort((a, b) => a.d - b.d);
+    return out.length ? out.slice(0, 4) : null;
   }
   tick(game) {
     if (this.construction < this.constructionTarget) {
@@ -851,40 +867,57 @@ class Repair extends Building {
       }
       return;
     }
-    if (this.energy < this.maxEnergy) {
+    // Prune dead drones from the list
+    this.repairBots = this.repairBots.filter(d => !d.dead);
+
+    // Source: spawn a drone if any slot is empty
+    if (this.shipConstructionStep === 0 && this.repairBots.length < this.maxRepairBots) {
+      this.shipConstructionStep = 10;
+    }
+    if (this.shipConstructionStep > 0) {
+      if (this.shipConstructionTick <= 0) {
+        this.shipConstructionTick = 10;
+        const got = game.requestEnergy(this, 1);
+        this.shipConstructionStep -= got;
+        if (this.shipConstructionStep < 1) {
+          this.shipConstructionStep = 0;
+          this.spawnDrone(game);
+        }
+      }
+      this.shipConstructionTick--;
+    } else if (this.energy < this.maxEnergy) {
       this.energy += game.requestEnergy(this, this.maxEnergy - this.energy);
       if (this.energy > this.maxEnergy) this.energy = this.maxEnergy;
     }
-    this.healTimer -= 1;
-    if (this.healTimer <= 0 && this.energy >= 1) {
-      // find most damaged neighbor inside range
-      let best = null, bestRatio = 1;
-      for (const b of game.buildings) {
-        if (b.dead || b === this) continue;
-        if (b.hp >= b.maxHp) continue;
-        if (dist(this, b) > this.repairRange) continue;
-        const r = b.hp / b.maxHp;
-        if (r < bestRatio) { best = b; bestRatio = r; }
+
+    // Source: every 30 frames, scan for damaged neighbors and assign idle drones
+    if (this.targetTick <= 0) {
+      this.targetTick = 30;
+      const targets = this.nextTarget(game);
+      if (targets) {
+        for (const d of this.repairBots) {
+          if (d.returnToBase && d.energy === d.maxEnergy && d.hp === d.maxHp) {
+            d.returnToBase = false;
+            d.target = targets[0].node;
+            d.launchCooldown = 60;
+          }
+        }
       }
-      if (best) {
-        best.hp = Math.min(best.maxHp, best.hp + REPAIR_AMOUNT);
-        this.energy -= 1;
-        this.lastHealed = best;
-        this.lastHealTimer = 6;
-      }
-      this.healTimer = REPAIR_TICK;
     }
-    if (this.lastHealTimer > 0) {
-      this.lastHealTimer -= 1;
-      if (this.lastHealTimer === 0) this.lastHealed = null;
-    }
+    this.targetTick--;
+  }
+  spawnDrone(game) {
+    // Source: 90° spacing around the base, 9px offset
+    const slot = this.repairBots.length;
+    const a = slot * Math.PI / 2;
+    const bx = this.x + Math.cos(a) * 9;
+    const by = this.y + Math.sin(a) * 9;
+    const drone = new Drone(bx, by, this, a);
+    this.repairBots.push(drone);
+    game.drones = game.drones || [];
+    game.drones.push(drone);
   }
   draw(ctx) {
-    if (this.lastHealed && this.lastHealTimer > 0) {
-      ctx.strokeStyle = `rgba(120, 255, 170, ${this.lastHealTimer / 6})`;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(this.lastHealed.x, this.lastHealed.y); ctx.stroke();
-    }
     ctx.fillStyle = this.networked ? "#0e2a18" : "#08140a";
     ctx.strokeStyle = this.networked ? "#78ffaa" : "#3a8260";
     ctx.lineWidth = 1.5;
@@ -896,6 +929,124 @@ class Repair extends Building {
     ctx.moveTo(this.x, this.y - 4); ctx.lineTo(this.x, this.y + 4);
     ctx.stroke();
     if (this.construction < this.constructionTarget) drawConstructionBar(ctx, this);
+  }
+}
+
+// Repair drone (repair1). Source constants: _maxSpeed 1.8, _easing 12,
+// _life 60, _energy 80, _maxEnergy 80, _repairRange 50, _type "drone".
+// Behavior: fly toward _repair (target damaged building); when in range,
+// drain 1 energy/frame and fire a green healing laser (negative damage).
+// When target full or own energy out, set _returnToBase = true; recharge
+// at base (3 life + 6 energy per base energy consumed).
+class Drone {
+  constructor(x, y, base, slotAngle) {
+    this.x = x; this.y = y;
+    this.base = base;
+    this.facing = slotAngle;
+    this.basePos = [x, y, slotAngle];
+    this.maxSpeed = 1.8;
+    this.speed = 0;
+    this.easing = 12;
+    this.maxHp = 60; this.hp = 60;
+    this.maxEnergy = 80; this.energy = 80;
+    this.repairRange = 50;
+    this.returnToBase = true;
+    this.target = null;       // source _repair
+    this.launchCooldown = 0;
+    this.dead = false;
+    this.beam = null;
+    this.flash = 0;
+    this.type = "drone";
+    this.size = 4;
+  }
+  damage(dmg) { this.hp -= dmg; this.flash = 0.12; if (this.hp <= 0) this.dead = true; }
+  tickFlash(dt) { if (this.flash > 0) this.flash = Math.max(0, this.flash - dt); }
+  tick(game) {
+    if (this.beam) {
+      this.beam.life--;
+      if (this.beam.life <= 0) this.beam = null;
+    }
+    if (this.hp <= 0) { this.dead = true; return; }
+    let dx, dy, atBase = false;
+    if (this.returnToBase) {
+      dx = this.basePos[0] - this.x;
+      dy = this.basePos[1] - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 2) {
+        // docked: recharge from base energy
+        this.x = this.basePos[0]; this.y = this.basePos[1];
+        this.facing = this.basePos[2];
+        atBase = true;
+        if (this.hp < this.maxHp && this.base.energy >= 1) {
+          this.hp = Math.min(this.maxHp, this.hp + 3);
+          this.base.energy -= 1;
+        }
+        if (this.energy < this.maxEnergy && this.base.energy >= 1) {
+          this.energy = Math.min(this.maxEnergy, this.energy + 6);
+          this.base.energy -= 1;
+        }
+      }
+    } else {
+      if (!this.target || this.target.dead) {
+        // current target lost — find next or return to base
+        const nxt = this.base.nextTarget(game);
+        if (nxt) { this.target = nxt[Math.floor(Math.random() * nxt.length)].node; this.launchCooldown = 20; this.easing = 40; }
+        else { this.returnToBase = true; this.target = null; }
+        return;
+      }
+      dx = this.target.x - this.x;
+      dy = this.target.y - this.y;
+    }
+    if (!atBase) {
+      if (this.speed < this.maxSpeed) this.speed += 0.02;
+      // rotation easing toward target
+      const desired = Math.atan2(dy, dx);
+      let drot = desired - this.facing;
+      while (drot > Math.PI) drot -= 2 * Math.PI;
+      while (drot < -Math.PI) drot += 2 * Math.PI;
+      this.facing += drot / this.easing;
+      this.x += Math.cos(this.facing) * this.speed;
+      this.y += Math.sin(this.facing) * this.speed;
+      if (this.returnToBase) {
+        if (this.easing > 1) this.easing--;
+      } else {
+        if (this.easing < 12) this.easing++;
+        if (this.energy > 0 && this.target) {
+          // if target healed, find another or go home
+          if (this.target.hp >= this.target.maxHp) {
+            const nxt = this.base.nextTarget(game);
+            if (nxt) { this.target = nxt[Math.floor(Math.random() * nxt.length)].node; this.easing = 40; this.launchCooldown = 20; }
+            else { this.returnToBase = true; this.target = null; }
+          } else if (this.launchCooldown <= 0) {
+            const dToTarget = Math.hypot(this.target.x - this.x, this.target.y - this.y);
+            if (dToTarget < this.repairRange) {
+              this.energy--;
+              this.target.hp = Math.min(this.target.maxHp, this.target.hp + 1);
+              this.beam = { tx: this.target.x, ty: this.target.y, life: 2 };
+            }
+          } else this.launchCooldown--;
+        } else if (this.energy <= 0) {
+          this.returnToBase = true; this.target = null;
+        }
+      }
+    }
+  }
+  draw(ctx) {
+    if (this.beam) {
+      ctx.strokeStyle = "rgba(0, 255, 0, 0.85)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(this.beam.tx, this.beam.ty); ctx.stroke();
+    }
+    ctx.fillStyle = "#1a4226";
+    ctx.strokeStyle = "#78ffaa";
+    ctx.lineWidth = 1.2;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.facing);
+    ctx.beginPath();
+    ctx.moveTo(4, 0); ctx.lineTo(-3, -3); ctx.lineTo(-3, 3); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -1287,6 +1438,7 @@ class Game {
     this.ships = [];
     this.rockets = [];
     this.particles = [];
+    this.drones = [];
     this.energyFlashes = [];
     this.minerals = this.level.minerals;
     this.totalMined = 0;
@@ -1717,6 +1869,9 @@ class Game {
     // rockets
     for (const r of this.rockets) r.update(this);
     this.rockets = this.rockets.filter(r => !r.dead);
+    // Repair drones (source ship "repair1")
+    for (const d of this.drones) { if (!d.dead) { d.tick(this); d.tickFlash(1 / TPS); } }
+    this.drones = this.drones.filter(d => !d.dead);
     // particles
     for (const p of this.particles) {
       p.x += p.vx / TPS; p.y += p.vy / TPS;
@@ -1816,6 +1971,7 @@ class Game {
     for (const s of this.ships) if (!s.dead) drawFlashOverlay(ctx, s);
     // rockets
     for (const r of this.rockets) r.draw(ctx);
+    for (const d of this.drones) if (!d.dead) d.draw(ctx);
     // particles
     for (const p of this.particles) {
       const a = clamp(p.life / p.maxLife, 0, 1);
