@@ -850,7 +850,7 @@ const SHIP_STATS = {
   exploder: { hp:  60, speed: 1.8, damage: 40,  fireRange: 0,   fireGap: 1,   size: 8,  color: "#ff6600", fill: "#33180a", suicide: true },
   ring:     { hp: 200, speed: 1.4, damage: 10,  fireRange: 60,  fireGap: 60,  size: 11, color: "#ffff00", fill: "#332e08" },
   swarmer:  { hp:  35, speed: 2.4, damage: 4,   fireRange: 70,  fireGap: 40,  size: 5,  color: "#cccccc", fill: "#222222" },
-  mother:   { hp: 600, speed: 0.6, damage: 12,  fireRange: 200, fireGap: 90,  size: 22, color: "#ff00ff", fill: "#330033", spawnsSwarmers: true },
+  mother:   { hp: 600, speed: 0.6, damage: 12,  fireRange: 200, fireGap: 90,  size: 14, color: "#ff00ff", fill: "#330033", spawnsSwarmers: true },
 };
 class Ship extends Entity {
   constructor(x, y, kind = "fighter", waveScale = 1) {
