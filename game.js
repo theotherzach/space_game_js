@@ -373,7 +373,11 @@ class Miner extends Building {
         game.minerals += take;
         this.laser = { tx: target.x, ty: target.y, alpha: 1 };
         this.minedOK = true;
-        Sfx.play("mining");
+        // throttle mining sound: only play if it hasn't fired recently across the whole game
+        if (!game.lastMiningSfx || game.tickCount - game.lastMiningSfx > 8) {
+          Sfx.play("mining");
+          game.lastMiningSfx = game.tickCount;
+        }
       } else {
         this.minedOK = false;
       }
@@ -1613,10 +1617,12 @@ class Game {
     const next = this.waveList?.[this.nextWaveTickIndex];
     if (!this.over && next) {
       const t = Math.max(0, next.delay - this.time);
-      ctx.fillStyle = "rgba(255, 220, 120, 0.75)";
-      ctx.font = "13px monospace";
+      const imminent = t < 5;
+      ctx.fillStyle = imminent ? "rgba(255, 116, 102, 0.95)" : "rgba(255, 220, 120, 0.75)";
+      ctx.font = imminent ? "bold 14px monospace" : "13px monospace";
       ctx.textAlign = "center";
-      ctx.fillText(`Next: ${next.count}× ${next.kind} in ${t.toFixed(1)}s — V to send`, W / 2, 22);
+      const tag = imminent ? "INCOMING" : "Next";
+      ctx.fillText(`${tag}: ${next.count}× ${next.kind} in ${t.toFixed(1)}s — V to send`, W / 2, 22);
     }
     if (this.over) {
       ctx.fillStyle = this.over === "win" ? "rgba(107, 217, 107, 0.95)" : "rgba(255, 116, 102, 0.95)";
