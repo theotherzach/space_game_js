@@ -1159,20 +1159,28 @@ class Game {
 
     document.addEventListener("keydown", e => this.onKeyDown(e));
 
-    for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
+    for (const btn of document.querySelectorAll("#topbar .speeds button[data-speed]")) {
       btn.addEventListener("click", () => { this.speed = parseFloat(btn.dataset.speed); this.refreshSpeedUI(); });
     }
     document.getElementById("restart").addEventListener("click", () => this.reset(this.level ? this.level.id : 1));
-    for (const btn of document.querySelectorAll("#missions button[data-level]")) {
-      btn.addEventListener("click", () => this.reset(parseInt(btn.dataset.level, 10)));
-    }
+    // Menu open/close + tab switching + level selection
+    document.getElementById("open-menu").addEventListener("click", () => this.openMenu());
+    document.querySelectorAll(".menu-tabs button").forEach(b => {
+      b.addEventListener("click", () => this.selectMenuTab(b.dataset.tab));
+    });
+    document.querySelectorAll(".menu-level").forEach(b => {
+      b.addEventListener("click", () => {
+        this.reset(parseInt(b.dataset.level, 10));
+        this.closeMenu();
+      });
+    });
     document.getElementById("send-wave").addEventListener("click", () => this.skipToNextWave());
     const mute = document.getElementById("mute");
     if (mute) mute.addEventListener("click", () => {
       Sfx.setEnabled(!Sfx.enabled);
       mute.textContent = Sfx.enabled ? "🔊" : "🔇";
     });
-    for (const btn of document.querySelectorAll("#build button[data-build]")) {
+    for (const btn of document.querySelectorAll(".build-tile[data-build]")) {
       btn.addEventListener("click", () => {
         const t = btn.dataset.build;
         this.placement = (t === "cancel" || this.placement === t) ? null : t;
@@ -1959,26 +1967,37 @@ class Game {
   refreshHud() {
     const setText = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
     setText("minerals", Math.floor(this.minerals));
-    setText("goal", `${Math.floor(this.totalMined)}/${this.goal}`);
+    // Goal block matches source format: "X mined [P%]"
+    const pct = this.goal > 0 ? Math.floor(100 * this.totalMined / this.goal) : 0;
+    setText("goal", this.level?.endless
+      ? `Wave ${this.waveNumber || 0} · ${Math.floor(this.totalMined)} mined`
+      : `${Math.floor(this.totalMined)} mined [${pct}%]`);
     setText("clock", fmtTime(this.time));
-    setText("rate", "—");  // rate is now per-miner; HUD value placeholder
-    const networked = this.buildings.filter(b => b.networked && b.type !== "energy").length;
-    const cap = this.buildings.filter(b => b.networked && b.type === "energy").reduce((s, b) => s + b.maxEnergy, 0);
-    setText("energy", Math.floor(this.buildings.reduce((s, b) => s + (b.type === "energy" ? b.energy : 0), 0)));
-    setText("energy-max", Math.floor(cap));
-    setText("mission", "1");
+    // Mining rate (per minute) over last few seconds
+    const minute_rate = this._lastRateSample !== undefined
+      ? ((this.totalMined - this._lastRateSample) * 60 / 2)   // 2-sec window
+      : 0;
+    if (this.tickCount % 60 === 0) this._lastRateSample = this.totalMined;
+    setText("rate", Math.max(0, Math.round(minute_rate)));
+    const gen_energy = this.buildings.reduce((s, b) => s + (b.type === "energy" ? b.energy : 0), 0);
+    const gen_cap = this.buildings.filter(b => b.type === "energy").reduce((s, b) => s + b.maxEnergy, 0);
+    setText("energy", Math.floor(gen_energy));
+    const pctE = gen_cap > 0 ? Math.floor(100 * gen_energy / gen_cap) : 0;
+    setText("energy-pct", pctE + "%");
+    const ebar = document.getElementById("energy-bar-fill");
+    if (ebar) ebar.style.width = pctE + "%";
+    setText("mission", this.level ? this.level.id : "—");
+    setText("hud-mission-name", this.level ? this.level.name : "");
     setText("total-minerals", Math.floor(this.asteroids.reduce((s, a) => s + a.energy, 0)));
     // affordability
-    for (const btn of document.querySelectorAll("#build button[data-build]")) {
+    for (const btn of document.querySelectorAll(".build-tile[data-build]")) {
       const t = btn.dataset.build;
-      if (t === "cancel" || t === "sell") continue;
       btn.classList.toggle("disabled", this.minerals < (COSTS[t] || Infinity));
     }
-    // keep the "X buildings under construction" hint fresh
     if (!this.placement) this.refreshBuildUI();
   }
   refreshBuildUI() {
-    for (const btn of document.querySelectorAll("#build button[data-build]")) {
+    for (const btn of document.querySelectorAll(".build-tile[data-build]")) {
       btn.classList.toggle("active", btn.dataset.build === this.placement);
     }
     const hint = document.getElementById("hint");
@@ -1996,15 +2015,34 @@ class Game {
     }
   }
   refreshSpeedUI() {
-    for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
+    for (const btn of document.querySelectorAll("#topbar .speeds button[data-speed]")) {
       btn.classList.toggle("active", parseFloat(btn.dataset.speed) === this.speed);
     }
   }
   refreshLevelLabel() {
-    const ml = document.getElementById("mission-label");
-    if (ml && this.level) ml.textContent = this.level.name;
     const me = document.getElementById("mission");
     if (me && this.level) me.textContent = this.level.id;
+    const ml = document.getElementById("hud-mission-name");
+    if (ml && this.level) ml.textContent = this.level.name;
+  }
+  openMenu() {
+    const m = document.getElementById("menu");
+    if (m) m.classList.remove("hidden");
+    this.prevSpeed = this.speed;
+    this.speed = 0;
+    this.refreshSpeedUI();
+  }
+  closeMenu() {
+    const m = document.getElementById("menu");
+    if (m) m.classList.add("hidden");
+    if (this.prevSpeed !== undefined) {
+      this.speed = this.prevSpeed;
+      this.refreshSpeedUI();
+    }
+  }
+  selectMenuTab(tab) {
+    document.querySelectorAll(".menu-tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+    document.querySelectorAll(".menu-content section").forEach(s => s.classList.toggle("active", s.dataset.section === tab));
   }
   refreshSelectionPanel() {
     const panel = document.getElementById("selection");

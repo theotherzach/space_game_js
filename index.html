@@ -3,70 +3,166 @@
 <head>
 <meta charset="utf-8">
 <title>The Space Game (JS)</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260523o">
 </head>
 <body>
-<div id="hud">
-  <div id="status">
-    <span id="minerals">0</span>min
-    <span class="sep">·</span>
-    <span id="energy">0</span>/<span id="energy-max">0</span>e
-    <span class="sep">·</span>
-    M<span id="mission">1</span> <span id="mission-label" class="muted"></span>
-    <span class="sep">·</span>
-    <span id="clock">00:00</span>
-    <span class="sep">·</span>
-    Goal: <span id="goal">0</span>
-    <span class="sep">·</span>
-    Field: <span id="total-minerals">0</span>
+
+<!-- ==================== MAIN MENU OVERLAY ==================== -->
+<div id="menu" class="hidden">
+  <div class="menu-inner">
+    <h1>The Space Game</h1>
+    <nav class="menu-tabs">
+      <button data-tab="missions" class="active">Missions</button>
+      <button data-tab="mining">Mining Modes</button>
+      <button data-tab="survival">Survival Modes</button>
+      <button data-tab="bonus">Bonus Modes</button>
+      <button data-tab="credits">Credits</button>
+    </nav>
+    <div class="menu-content">
+      <section data-section="missions" class="active">
+        <h2>Mine your way into enemy space</h2>
+        <p>Select an asteroid field to mine. The deeper you mine into enemy space the more pirates you attract.</p>
+        <div class="menu-level-list">
+          <button class="menu-level" data-level="1"><b>Easy Mode</b><span>Goal 15 000 · 50 asteroids</span></button>
+          <button class="menu-level" data-level="2"><b>Normal Mode</b><span>Goal 30 000 · 60 asteroids</span></button>
+          <button class="menu-level" data-level="3"><b>Hard Mode</b><span>Goal 40 000 · 80 asteroids</span></button>
+          <button class="menu-level" data-level="4"><b>Madness!</b><span>Goal 40 000 · 85 asteroids · fast waves</span></button>
+        </div>
+      </section>
+      <section data-section="mining">
+        <h2>Race against the asteroid field</h2>
+        <p>No enemies. Mine every asteroid as fast as you can.</p>
+        <div class="menu-level-list">
+          <button class="menu-level" data-level="8"><b>Speed Miner</b><span>25 small asteroids — mine them all</span></button>
+        </div>
+      </section>
+      <section data-section="survival">
+        <h2>How long can you hold the line?</h2>
+        <p>No mineral goal. Waves arrive in a never-ending crescendo.</p>
+        <div class="menu-level-list">
+          <button class="menu-level" data-level="5"><b>Survivor: Gentle</b><span>Slow ramp</span></button>
+          <button class="menu-level" data-level="6"><b>Survivor: Bring it</b><span>Faster, harder</span></button>
+          <button class="menu-level" data-level="7"><b>Survivor: No Hope</b><span>You will die</span></button>
+        </div>
+      </section>
+      <section data-section="bonus">
+        <h2>For the curious</h2>
+        <p>Free building, no pressure.</p>
+        <div class="menu-level-list">
+          <button class="menu-level" data-level="9"><b>Sandbox</b><span>Unlimited minerals, no enemies</span></button>
+        </div>
+      </section>
+      <section data-section="credits">
+        <h2>Credits</h2>
+        <p>Source: <b>The Space Game</b> (2009) by David Scott and Soma Tone, published by The Casual Collective.</p>
+        <p>JS port from the decompiled ActionScript&nbsp;2 source at
+          <code>thespacegame.v83.swf</code>.</p>
+      </section>
+    </div>
   </div>
-  <div id="speeds">
+</div>
+
+<!-- ==================== TOP TOOLBAR ==================== -->
+<div id="topbar">
+  <div class="speeds">
     <button data-speed="0">Pause</button>
     <button data-speed="0.5">Slow</button>
     <button data-speed="1" class="active">Normal</button>
     <button data-speed="3">Fast</button>
-    <button id="send-wave" title="Skip the wave countdown (V)">Send wave</button>
-    <button id="mute" title="Toggle audio (M)">🔊</button>
+  </div>
+  <div class="mission-id">Mission <span id="mission">1</span></div>
+  <div class="clock-block">Time taken: <span id="clock">00:00</span></div>
+  <div id="goal-bar"><span id="goal">0 mined [0%]</span></div>
+  <div class="right-buttons">
+    <button id="open-menu">Menu</button>
     <button id="restart">Restart</button>
+    <button id="mute" title="Toggle audio (M)">🔊</button>
+    <button id="send-wave" title="Skip the wave countdown (V)">Send wave</button>
   </div>
 </div>
 
-<div id="missions">
-  <button data-level="1">Easy</button>
-  <button data-level="2">Normal</button>
-  <button data-level="3">Hard</button>
-  <button data-level="4">Madness!</button>
-  <button data-level="5">Survivor: Gentle</button>
-  <button data-level="6">Survivor: Bring it</button>
-  <button data-level="7">Survivor: No Hope</button>
-  <button data-level="8">Speed Miner</button>
-  <button data-level="9">Sandbox</button>
-</div>
+<!-- ==================== GAME PLAY AREA ==================== -->
+<div id="play-area">
+  <canvas id="game" width="1024" height="640"></canvas>
 
-<canvas id="game" width="1024" height="640"></canvas>
+  <!-- Right-side HUD (ported from source's right panel layout) -->
+  <aside id="hud-right">
+    <div class="hud-row"><span id="minerals">0</span> minerals</div>
+    <div class="hud-row muted"><span id="rate">0</span> minerals per minute</div>
+    <div class="hud-row energy">
+      <span id="energy">0</span> energy
+      (<span id="energy-pct">0%</span>)
+    </div>
+    <div class="energy-bar"><div id="energy-bar-fill"></div></div>
+    <div class="hud-row muted small">Field: <span id="total-minerals">0</span></div>
+    <div class="hud-row muted small" id="hud-mission-name"></div>
+  </aside>
 
-<div id="selection" class="hidden">
-  <button id="sel-close" title="Close (Esc)">×</button>
-  <div id="sel-name">—</div>
-  <div id="sel-stats">—</div>
-  <div id="sel-actions">
-    <button id="sel-upgrade">Upgrade</button>
-    <button id="sel-sell">Sell</button>
+  <!-- Selection panel for an actively-selected building -->
+  <div id="selection" class="hidden">
+    <button id="sel-close" title="Close (Esc)">×</button>
+    <div id="sel-name">—</div>
+    <div id="sel-stats">—</div>
+    <div id="sel-actions">
+      <button id="sel-upgrade">Upgrade</button>
+      <button id="sel-sell">Sell</button>
+    </div>
   </div>
 </div>
 
+<!-- ==================== BUILD TILE BAR ==================== -->
 <div id="build">
-  <button data-build="relay" title="Relay (1) — 20 min."><b>Relay</b><span class="cost">20 <em>1</em></span></button>
-  <button data-build="miner" title="Miner (2) — 45 min."><b>Miner</b><span class="cost">45 <em>2</em></span></button>
-  <button data-build="energy" title="Energy (3) — 200 min."><b>Energy</b><span class="cost">200 <em>3</em></span></button>
-  <button data-build="store" title="Store (4) — 300 min."><b>Store</b><span class="cost">300 <em>4</em></span></button>
-  <button data-build="repair" title="Repair (5) — 300 min."><b>Repair</b><span class="cost">300 <em>5</em></span></button>
-  <button data-build="laser" title="Laser turret (6) — 100 min."><b>Laser</b><span class="cost">100 <em>6</em></span></button>
-  <button data-build="rocket" title="Rocket turret (7) — 400 min."><b>Rocket</b><span class="cost">400 <em>7</em></span></button>
-  <button data-build="cancel" class="cancel">Cancel</button>
-  <span id="hint">Click a building or press 1/2/3. Right-click drag to pan, wheel zooms.</span>
+  <button class="build-tile" data-build="relay" title="Relay (1) — connects the network">
+    <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="3" fill="currentColor"/>
+      <circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.4"/>
+      <line x1="16" y1="16" x2="29" y2="3" stroke="currentColor" stroke-width="1"/>
+      <line x1="16" y1="16" x2="3" y2="3" stroke="currentColor" stroke-width="1"/>
+      <line x1="16" y1="16" x2="16" y2="29" stroke="currentColor" stroke-width="1"/>
+    </svg>
+    <div class="cost">20m <em>1</em></div>
+  </button>
+  <button class="build-tile" data-build="miner" title="Miner (2) — pulse-extracts asteroids">
+    <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="9" stroke="currentColor" stroke-width="2" fill="none"/>
+      <rect x="14" y="14" width="4" height="4" fill="currentColor"/>
+      <line x1="22" y1="9" x2="29" y2="3" stroke="currentColor" stroke-width="2"/>
+    </svg>
+    <div class="cost">45m <em>2</em></div>
+  </button>
+  <button class="build-tile" data-build="energy" title="Energy (3) — generates power">
+    <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" stroke="currentColor" stroke-width="2" fill="none"/>
+      <path d="M11 11 L21 11 L11 21 L21 21" stroke="currentColor" stroke-width="1.5" fill="none"/>
+    </svg>
+    <div class="cost">200m <em>3</em></div>
+  </button>
+  <button class="build-tile" data-build="store" title="Store (4) — buffers energy">
+    <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" stroke="currentColor" stroke-width="2" fill="none"/>
+      <rect x="12" y="9" width="3" height="14" fill="currentColor"/>
+      <rect x="17" y="9" width="3" height="14" fill="currentColor"/>
+    </svg>
+    <div class="cost">300m <em>4</em></div>
+  </button>
+  <button class="build-tile" data-build="repair" title="Repair (5) — heals neighbors">
+    <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" stroke="currentColor" stroke-width="2" fill="none"/>
+      <line x1="10" y1="16" x2="22" y2="16" stroke="currentColor" stroke-width="2"/>
+      <line x1="16" y1="10" x2="16" y2="22" stroke="currentColor" stroke-width="2"/>
+    </svg>
+    <div class="cost">300m <em>5</em></div>
+  </button>
+  <button class="build-tile" data-build="laser" title="Laser turret (6) — sustained beam">
+    <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" stroke="currentColor" stroke-width="2" fill="none"/>
+      <polygon points="16,5 19,16 16,27 13,16" fill="currentColor"/>
+    </svg>
+    <div class="cost">100m <em>6</em></div>
+  </button>
+  <button class="build-tile" data-build="rocket" title="Rocket turret (7) — splash damage">
+    <svg viewBox="0 0 32 32"><polygon points="16,4 26,16 22,18 22,28 10,28 10,18 6,16" stroke="currentColor" stroke-width="1.5" fill="none"/>
+      <circle cx="16" cy="14" r="2" fill="currentColor"/>
+    </svg>
+    <div class="cost">400m <em>7</em></div>
+  </button>
+  <div id="hint">Click a building or press 1-7. Right-click drag to pan, wheel zooms.</div>
 </div>
 
-<script src="game.js?v=20260523n"></script>
+<script src="game.js?v=20260523o"></script>
 </body>
 </html>
