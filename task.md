@@ -14,38 +14,45 @@ Lives here so it survives context resets.
 ## Shipped
 
 - Top-down RTS with vanilla Canvas, no framework, no bundler
-- Three building types: Connector (15), Miner (40), Turret (60)
+- Building types: Connector (15), Miner (40), Turret (60), Laser turret (150), Booster (80)
 - BFS power network from the base; out-of-range buildings go inert
-- Mineral asteroid clusters spawn around the base each run
-- Two enemy types: Raider (default) and Scout (faster, lower HP, spawns from wave 2)
+- Mineral asteroid clusters spawn around the base each run; abundance scales per mission
+- Four enemy types: Raider, Scout (wave 2+), Tank (wave 3+), Bomber (wave 4+, suicide AOE)
 - Turrets carry their damage on each fired bullet so tech buffs don't retroactively boost in-flight rounds
-- Damage flashes on hit, death particles for both enemies and buildings
+- Damage flashes on hit, death particles for enemies and buildings, bomber AOE on contact
 - Sell mode: refund 60% of build cost, hover shows the refund preview
 - Speed controls (Pause/Slow/Normal/Fast); Spacebar pause; Esc cancels placement
-- Win at 1500 collected minerals; lose if base HP hits 0
+- Skip-wave button ("Send wave" / W) collapses the countdown when the field is clear
+- Approach markers: pulsing triangles on the edge in the last 3s of countdown showing where the next wave will arrive
+- Audio: Web Audio oscillator SFX for build/sell/shoot/hit/death/wave/win/lose/research, mute toggle
+- Boosters: aura buffs nearby networked miners (extraction) and turrets (damage + rate of fire); +25% per booster, stacks
 - Tech tree: 3 branches × 3 tiers (Economy / Network / Defense), all linear within branch
   - Buying re-renders the tree, rescales HP proportionally on existing buildings, recomputes the network
   - "R" key or Research button opens a modal that auto-pauses the sim
+- **Campaign**: 3 missions (Outpost / Frontier / Heart of the Storm) with escalating goals,
+  starting minerals, mineral abundance, and wave intensity
+- Mission panel with locked/unlocked/current state; win unlocks the next mission
+- Win banner shows mission name + stats (time, minerals, kills, waves) and offers Next/Replay/Missions
+- `localStorage` save (key `space_game_js.save.v1`): persists `researched` set and `unlocked` mission;
+  Reset save button in the mission panel
 
 ## Known issues / gaps
 
-- Research is wiped on Restart. Not persisted across reloads either.
-- Only one mission, one fixed goal value. No campaign progression.
-- No save state, no settings, no audio.
 - No mobile/touch input support.
-- Wave timer is fixed; no "press to start next wave" button.
+- No volume control (only mute toggle).
+- Mineral hover tooltips would help; right now you have to read tiny numbers near each rock.
+- Turret/Miner UI doesn't surface their current boosted rate visually.
+- Only 3 missions. No randomized "endless" mode.
 
 ## Open ideas (in rough priority)
 
-1. Persist research between Restarts in the same session, and optionally in localStorage
-2. "Start next wave now" button to skip the countdown
-3. More enemy types: tank (slow, high HP, high damage) and bomber (suicide AOE on base)
-4. Mission select / progression with escalating goals and starting tech
-5. New building types: Power Hub (range extender), Laser Turret (Tier 2 unlock from a new tech node)
-6. Audio: build/sell/shoot/death/wave-start cues (single short oscillator-based blips, no assets)
-7. Mineral display tweaks: highlight the cluster a hovered miner is mining
-8. Visible enemy approach indicators on the edges before they enter
-9. Mobile/touch layout
+1. Endless mode (mission 4) — no goal, see how many waves you survive
+2. Hover tooltips on buildings showing current effective rate and boost stacks
+3. Volume slider + audio mix tuning (some sounds are louder than necessary)
+4. Mineral aggregate UI: total remaining minerals on map shown in HUD
+5. Mobile/touch layout
+6. Stretch: keyboard shortcuts for build modes (C/M/T/L/B/S)
+7. Stretch: drag-place buildings (build many connectors at once)
 
 ## Notes
 

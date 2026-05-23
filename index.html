@@ -14,7 +14,7 @@
     <span class="sep">·</span>
     <span id="energy">0</span>/<span id="energy-max">0</span> energy
     <span class="sep">·</span>
-    Mission <span id="mission">1</span>
+    Mission <span id="mission">1</span> <span id="mission-label" class="muted"></span>
     <span class="sep">·</span>
     <span id="clock">00:00</span>
     <span class="sep">·</span>
@@ -27,6 +27,7 @@
     <button data-speed="3">Fast</button>
     <button id="send-wave" title="Skip the wave countdown (W)">Send wave</button>
     <button id="research" title="Research (R)">Research</button>
+    <button id="missions" title="Mission select">Missions</button>
     <button id="mute" title="Toggle audio (M)">🔊</button>
     <button id="restart">Restart</button>
   </div>
@@ -45,7 +46,18 @@
   <span id="hint">Click a building to start placing. Then click on the map.</span>
 </div>
 
-<div id="banner" class="hidden"><span id="banner-text"></span></div>
+<div id="banner" class="hidden"><div id="banner-text"></div></div>
+
+<div id="mission-panel" class="hidden">
+  <div id="mission-panel-inner">
+    <div id="mission-header">
+      <h2>Missions</h2>
+      <button id="mission-close" title="Close (Esc)">×</button>
+    </div>
+    <div id="mission-list"></div>
+    <div id="mission-footer">Tech research is carried across missions. <button id="reset-save" class="link">Reset save</button></div>
+  </div>
+</div>
 
 <div id="tech-panel" class="hidden">
   <div id="tech-panel-inner">

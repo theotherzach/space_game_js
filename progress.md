@@ -4,6 +4,32 @@ Running log of changes. Newest at the top. Survives context resets.
 
 ## 2026-05-22
 
+### Session 1, batch 6 — missions + save + end-of-mission stats
+
+- **Three-mission campaign** with `MISSIONS` data: Outpost (1500 goal),
+  Frontier (2500 goal, +15% mineral abundance and harder waves), Heart of
+  the Storm (4000 goal, +30% mineral abundance, ~50% more enemies per wave).
+- `reset(missionId)` accepts an explicit mission; researched set is carried
+  across resets (campaign-style progression). `hardReset()` wipes everything.
+- **Win/lose banner** now shows mission name + stats panel (elapsed, mined,
+  kills, waves) and offers Next mission / Replay / Missions buttons.
+- **Mission panel** (`#mission-panel`) modal with one card per mission, lock
+  state, current marker. Reset-save link wipes localStorage.
+- **localStorage save** under key `space_game_js.save.v1`. Persists on
+  research purchase, mission win, and hard reset. Auto-loads on init.
+
+### Session 1, batch 5 — bomber + booster + laser
+
+- **Bomber enemy**: suicide-on-contact, AOE damage to all buildings in 72 px
+  with linear falloff. Pulsing orange diamond. Spawns from wave 4.
+- **Booster**: cyan-green node with 90 px aura. Networked miners gain +25%
+  extraction per booster; turrets gain +25% damage and 25% faster fire.
+  Stacks multiplicatively with tech buffs.
+- **Laser turret variant**: `new Turret(x, y, "laser")` — 1.55× range,
+  2.1× damage, 1.6× fire interval. Cost 150. Bullets are faster and cyan.
+- Bullet damage is captured at fire time including the booster multiplier
+  so in-flight rounds aren't retroactively rebuffed.
+
 ### Session 1, batch 4 — audio + tank + approach markers + skip wave
 
 - **Audio**: `Sfx` object backed by Web Audio API. Pure oscillator+gain envelopes,

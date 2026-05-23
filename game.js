@@ -25,8 +25,29 @@ const BASE_HP = 200;
 const TURRET_HP = 60;
 const MINER_HP = 35;
 const CONNECTOR_HP = 25;
-const STARTING_MINERALS = 60;
-const GOAL = 1500;
+// ---------- missions ----------
+const MISSIONS = [
+  {
+    id: 1, name: "Mission 1: Outpost",
+    goal: 1500, startingMinerals: 60,
+    mineralAbundance: 1.0, clusters: 7, nodePerCluster: 3.5,
+    waveStartDelay: 22, waveCountMult: 1.0, waveStatMult: 1.0,
+  },
+  {
+    id: 2, name: "Mission 2: Frontier",
+    goal: 2500, startingMinerals: 80,
+    mineralAbundance: 1.15, clusters: 8, nodePerCluster: 4,
+    waveStartDelay: 18, waveCountMult: 1.25, waveStatMult: 1.15,
+  },
+  {
+    id: 3, name: "Mission 3: Heart of the Storm",
+    goal: 4000, startingMinerals: 110,
+    mineralAbundance: 1.3, clusters: 9, nodePerCluster: 4.5,
+    waveStartDelay: 15, waveCountMult: 1.5, waveStatMult: 1.35,
+  },
+];
+const MISSION_BY_ID = Object.fromEntries(MISSIONS.map(m => [m.id, m]));
+const SAVE_KEY = "space_game_js.save.v1";
 
 // ---------- tech tree ----------
 // Three branches × three tiers. Linear dependencies within each branch.
@@ -547,6 +568,7 @@ class Game {
     this.ctx = canvas.getContext("2d");
     this.stars = makeStars(180);
 
+    this.loadSave();
     this.reset();
 
     // input
@@ -586,7 +608,12 @@ class Game {
         this.refreshSpeedUI();
       });
     }
-    document.getElementById("restart").addEventListener("click", () => this.reset());
+    document.getElementById("restart").addEventListener("click", () => this.reset(this.mission.id));
+    document.getElementById("missions").addEventListener("click", () => this.openMissionPanel());
+    document.getElementById("mission-close").addEventListener("click", () => this.closeMissionPanel());
+    document.getElementById("reset-save").addEventListener("click", () => {
+      if (confirm("Reset all progress (research + unlocked missions)?")) this.hardReset();
+    });
     document.getElementById("research").addEventListener("click", () => this.toggleTechPanel());
     document.getElementById("tech-close").addEventListener("click", () => this.toggleTechPanel(false));
     document.getElementById("send-wave").addEventListener("click", () => this.skipToNextWave());
@@ -611,31 +638,45 @@ class Game {
     requestAnimationFrame(t => this.loop(t));
   }
 
-  reset() {
+  reset(missionId) {
+    if (missionId) this.mission = MISSION_BY_ID[missionId] || MISSIONS[0];
+    if (!this.mission) this.mission = MISSIONS[0];
     nextId = 1;
-    this.researched = new Set();
+    // researched is carried across reset (campaign progress)
+    if (!this.researched) this.researched = new Set();
+    if (this.unlocked === undefined) this.unlocked = 1;
     this.tech = computeTech(this.researched);
+    this.kills = 0;
     this.base = new Base(W / 2, H / 2);
-    this.buildings = [this.base];          // base + connectors + miners + turrets
+    this.buildings = [this.base];
     this.minerals = this.spawnMinerals();
     this.enemies = [];
     this.bullets = [];
     this.particles = [];
-    this.minerals_stored = STARTING_MINERALS;
+    this.minerals_stored = this.mission.startingMinerals;
     this.minerals_collected = 0;
     this.recent_mined = 0;
-    this.rate_window = [];                  // [t, amount] last few seconds
+    this.rate_window = [];
     this.time = 0;
     this.speed = 1;
-    this.next_wave = 22;                    // first wave at ~22s in
+    this.next_wave = this.mission.waveStartDelay;
     this.wave_number = 0;
     this.upcomingWave = null;
-    this.prepareWaveSpec();                 // seed the very first preview
-    this.over = null;                       // "win" | "lose" | null
+    this.prepareWaveSpec();
+    this.over = null;
     this.refreshBuildUI();
     this.refreshSpeedUI();
     this.renderTechTree();
     this.hideBanner();
+    this.refreshHud();
+  }
+
+  // Wipe everything including research and unlocked-mission progress.
+  hardReset() {
+    this.researched = new Set();
+    this.unlocked = 1;
+    this.persistSave();
+    this.reset(1);
   }
 
   // ---- research ----
@@ -658,26 +699,27 @@ class Game {
     this.tech = newTech;
     this.recomputeNetwork();
     this.renderTechTree();
+    this.persistSave();
     Sfx.play("research");
     return true;
   }
 
   spawnMinerals() {
     const out = [];
-    const clusters = 6 + Math.floor(Math.random() * 3);
+    const m = this.mission;
+    const clusters = Math.max(3, Math.round(m.clusters + (Math.random() - 0.5) * 2));
     for (let c = 0; c < clusters; c++) {
-      // angle around base, varying distance
-      const angle = (c / clusters) * Math.PI * 2 + Math.random() * 0.6;
+      const angle = (c / clusters) * Math.PI * 2 + Math.random() * 0.5;
       const dist0 = rand(160, 320);
       const cx = W / 2 + Math.cos(angle) * dist0;
       const cy = H / 2 + Math.sin(angle) * dist0;
-      const nodes = 3 + Math.floor(Math.random() * 4);
+      const nodes = Math.max(2, Math.round(m.nodePerCluster + (Math.random() - 0.5) * 2));
       for (let i = 0; i < nodes; i++) {
         const a = Math.random() * Math.PI * 2;
         const d = Math.random() * 45;
         const x = clamp(cx + Math.cos(a) * d, 30, W - 30);
         const y = clamp(cy + Math.sin(a) * d, 30, H - 30);
-        out.push(new Mineral(x, y, Math.floor(rand(70, 180))));
+        out.push(new Mineral(x, y, Math.floor(rand(70, 180) * m.mineralAbundance)));
       }
     }
     return out;
@@ -758,10 +800,11 @@ class Game {
 
   prepareWaveSpec() {
     const w = this.wave_number + 1;
-    const raiders = 2 + w;
-    const scouts  = w >= 2 ? Math.floor((w - 1) / 2) + 1 : 0;
-    const tanks   = w >= 3 ? 1 + Math.floor((w - 3) / 2) : 0;
-    const bombers = w >= 4 ? 1 + Math.floor((w - 4) / 3) : 0;
+    const mult = this.mission ? this.mission.waveCountMult : 1.0;
+    const raiders = Math.round((2 + w) * mult);
+    const scouts  = w >= 2 ? Math.round((Math.floor((w - 1) / 2) + 1) * mult) : 0;
+    const tanks   = w >= 3 ? Math.round((1 + Math.floor((w - 3) / 2)) * mult) : 0;
+    const bombers = w >= 4 ? Math.round((1 + Math.floor((w - 4) / 3)) * mult) : 0;
     const composition = [];
     for (let i = 0; i < raiders; i++) composition.push("raider");
     for (let i = 0; i < scouts;  i++) composition.push("scout");
@@ -775,17 +818,18 @@ class Game {
     if (!this.upcomingWave) this.prepareWaveSpec();
     const { w, positions } = this.upcomingWave;
     this.wave_number = w;
-    const raiderHp = 18 + w * 8;
-    const raiderSpeed = 30 + w * 2;
-    const raiderDmg = 4 + w;
-    const scoutHp = 8 + w * 3;
-    const scoutSpeed = 70 + w * 3;
-    const scoutDmg = 2 + Math.floor(w / 2);
-    const tankHp = 90 + w * 18;
-    const tankSpeed = 18 + w;
-    const tankDmg = 10 + w * 2;
-    const bomberHp = 30 + w * 5;
-    const bomberSpeed = 55 + w * 2;
+    const s = this.mission ? this.mission.waveStatMult : 1.0;
+    const raiderHp = (18 + w * 8) * s;
+    const raiderSpeed = (30 + w * 2) * Math.sqrt(s);
+    const raiderDmg = (4 + w) * s;
+    const scoutHp = (8 + w * 3) * s;
+    const scoutSpeed = (70 + w * 3) * Math.sqrt(s);
+    const scoutDmg = (2 + Math.floor(w / 2)) * s;
+    const tankHp = (90 + w * 18) * s;
+    const tankSpeed = (18 + w) * Math.sqrt(s);
+    const tankDmg = (10 + w * 2) * s;
+    const bomberHp = (30 + w * 5) * s;
+    const bomberSpeed = (55 + w * 2) * Math.sqrt(s);
     for (const slot of positions) {
       if (slot.kind === "scout") this.enemies.push(new Enemy(slot.x, slot.y, scoutHp, scoutSpeed, scoutDmg, 3, "scout"));
       else if (slot.kind === "tank") this.enemies.push(new Enemy(slot.x, slot.y, tankHp, tankSpeed, tankDmg, 20, "tank"));
@@ -853,6 +897,7 @@ class Game {
     const alive = [];
     for (const e of this.enemies) {
       if (e.dead) {
+        this.kills += 1;
         this.minerals_stored += e.value;
         let c = e.kind === "scout" ? "#c884ff"
               : e.kind === "tank"  ? "#9a2222"
@@ -897,15 +942,34 @@ class Game {
 
     // win / lose
     if (this.base.dead) this.endGame("lose");
-    if (this.minerals_collected >= GOAL) this.endGame("win");
+    if (this.minerals_collected >= this.mission.goal) this.endGame("win");
 
     this.refreshHud();
   }
 
   endGame(state) {
     this.over = state;
-    this.showBanner(state === "win" ? "Mission complete" : "Base destroyed", state);
+    if (state === "win" && this.mission.id >= this.unlocked && this.mission.id < MISSIONS.length) {
+      this.unlocked = this.mission.id + 1;
+      this.persistSave();
+    }
+    this.showEndBanner(state);
     Sfx.play(state);
+  }
+
+  loadSave() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || "{}"); } catch (_) {}
+    this.researched = new Set(s.researched || []);
+    this.unlocked = clamp(s.unlocked || 1, 1, MISSIONS.length);
+  }
+  persistSave() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        researched: [...this.researched],
+        unlocked: this.unlocked,
+      }));
+    } catch (_) {}
   }
 
   draw() {
@@ -1054,7 +1118,10 @@ class Game {
     document.getElementById("energy").textContent = networked_count;
     document.getElementById("energy-max").textContent = this.buildings.length - 1;
     document.getElementById("clock").textContent = fmtTime(this.time);
-    document.getElementById("goal").textContent = `${Math.floor(this.minerals_collected)}/${GOAL}`;
+    document.getElementById("goal").textContent = `${Math.floor(this.minerals_collected)}/${this.mission.goal}`;
+    document.getElementById("mission").textContent = this.mission.id;
+    const ml = document.getElementById("mission-label");
+    if (ml) ml.textContent = this.mission.name;
     // also update build button affordability tinting
     for (const btn of document.querySelectorAll("#build button[data-build]")) {
       const kind = btn.dataset.build;
@@ -1083,6 +1150,67 @@ class Game {
   }
   hideBanner() {
     document.getElementById("banner").classList.add("hidden");
+  }
+
+  showEndBanner(state) {
+    const b = document.getElementById("banner");
+    b.classList.remove("hidden", "win", "lose");
+    b.classList.add(state);
+    const title = state === "win" ? "Mission complete" : "Base destroyed";
+    const next = MISSION_BY_ID[this.mission.id + 1];
+    const minutes = Math.floor(this.time / 60);
+    const seconds = Math.floor(this.time % 60).toString().padStart(2, "0");
+    document.getElementById("banner-text").innerHTML = `
+      <div class="b-title">${title}</div>
+      <div class="b-mission">${this.mission.name}</div>
+      <div class="b-stats">
+        <div><span>${minutes}:${seconds}</span> elapsed</div>
+        <div><span>${Math.floor(this.minerals_collected)}</span> mined</div>
+        <div><span>${this.kills}</span> kills</div>
+        <div><span>${this.wave_number}</span> waves survived</div>
+      </div>
+      <div class="b-actions">
+        ${state === "win" && next ? `<button data-banner-action="next">Next mission →</button>` : ""}
+        <button data-banner-action="replay">${state === "win" ? "Replay" : "Try again"}</button>
+        <button data-banner-action="missions">Missions</button>
+      </div>
+    `;
+    for (const btn of b.querySelectorAll("button[data-banner-action]")) {
+      btn.addEventListener("click", () => {
+        const a = btn.dataset.bannerAction;
+        if (a === "next" && next) this.reset(next.id);
+        else if (a === "replay") this.reset(this.mission.id);
+        else if (a === "missions") { this.hideBanner(); this.openMissionPanel(); }
+      });
+    }
+  }
+
+  openMissionPanel() {
+    const panel = document.getElementById("mission-panel");
+    if (!panel) return;
+    const list = document.getElementById("mission-list");
+    list.innerHTML = "";
+    for (const m of MISSIONS) {
+      const card = document.createElement("button");
+      const locked = m.id > this.unlocked;
+      card.className = "mission-card" + (locked ? " locked" : "") + (m.id === this.mission.id ? " current" : "");
+      card.innerHTML = `
+        <span class="m-id">M${m.id}</span>
+        <span class="m-name">${m.name.replace(/^Mission \d+:\s*/, "")}</span>
+        <span class="m-goal">Goal: ${m.goal} minerals</span>
+        ${locked ? `<span class="m-lock">Locked — finish M${m.id - 1} to unlock</span>` : ""}
+      `;
+      if (!locked) card.addEventListener("click", () => {
+        this.reset(m.id);
+        panel.classList.add("hidden");
+      });
+      list.appendChild(card);
+    }
+    panel.classList.remove("hidden");
+  }
+  closeMissionPanel() {
+    const panel = document.getElementById("mission-panel");
+    if (panel) panel.classList.add("hidden");
   }
 
   toggleTechPanel(force) {
