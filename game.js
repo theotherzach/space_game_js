@@ -489,10 +489,12 @@ class LaserTurret extends Building {
           this.attack = null;
           this.fireStep = this.fireCooldown;
         } else if (this.energy > 0) {
-          // sustained beam: drain a fraction of energyNeeded per frame, deal damage
+          // sustained beam: drain a fraction of energyNeeded per frame,
+          // deal FULL damage per frame (source applies _damage every beam tick
+          // via _root.fire("laser", ...), which calls target._life.AddNum(-damage))
           const e = this.energyNeeded / 7 / this.fireStart;
           this.energy = Math.max(0, this.energy - e);
-          this.attack.damage(this.attackDamage / this.fireStart);
+          this.attack.damage(this.attackDamage);
           this.beam = { tx: this.attack.x, ty: this.attack.y, life: 2 };
         } else {
           this.fireStep = 0;
@@ -852,20 +854,38 @@ class Ship extends Entity {
     this.facing = 0;              // radians, for rotated rendering
   }
   tick(game) {
-    if (!this.target || this.target.dead) {
-      // mother ship targets the deepest networked building; others target nearest
+    // Source ship1.tick: _goal = mcMaps.mcMap.mcMiddle (the world origin).
+    // Non-suicide ships head toward origin first; only break off to attack
+    // when within fireRange of a building. Exploders home in on the closest
+    // building unconditionally — their goal is contact.
+    if (this.stats.suicide) {
+      if (!this.target || this.target.dead) {
+        let best = null, bestD = Infinity;
+        for (const b of game.buildings) {
+          if (b.dead) continue;
+          const d = dist(this, b);
+          if (d < bestD) { best = b; bestD = d; }
+        }
+        this.target = best;
+      }
+    } else if (!this.target || this.target.dead || dist(this, this.target) > this.fireRange + 20) {
       let best = null, bestD = Infinity;
       for (const b of game.buildings) {
         if (b.dead) continue;
         const d = dist(this, b);
-        if (d < bestD) { best = b; bestD = d; }
+        if (d <= this.fireRange + 20 && d < bestD) { best = b; bestD = d; }
       }
       this.target = best;
     }
-    if (!this.target) return;
-    const dx = this.target.x - this.x;
-    const dy = this.target.y - this.y;
-    const d = Math.hypot(dx, dy);
+    let dx, dy, d;
+    if (this.target) {
+      dx = this.target.x - this.x;
+      dy = this.target.y - this.y;
+    } else {
+      dx = -this.x;
+      dy = -this.y;     // head to origin (0,0)
+    }
+    d = Math.hypot(dx, dy) || 1;
     if (this.stats.suicide) {
       // exploder: closes distance and detonates AOE
       if (d > 12) {
@@ -889,16 +909,23 @@ class Ship extends Entity {
       if (this.spawnCooldown <= 0) {
         for (let i = 0; i < 2; i++) {
           const a = Math.random() * Math.PI * 2;
-          game.ships.push(new Ship(this.x + Math.cos(a) * 30, this.y + Math.sin(a) * 30, "swarmer"));
+          const child = new Ship(this.x + Math.cos(a) * 30, this.y + Math.sin(a) * 30, "swarmer");
+          // Inherit the parent's wave-scaled damage so baby swarmers don't
+          // bypass the level's damage curve (wave 1 has damage 0)
+          child.attackDamage = this.attackDamage;
+          game.ships.push(child);
         }
         this.spawnCooldown = 300;     // every ~10 sim seconds
       }
     }
     this.facing = Math.atan2(dy, dx);
-    if (d > this.fireRange) {
-      this.x += (dx / d) * this.speed;
-      this.y += (dy / d) * this.speed;
-    } else {
+    // Source ship1.tick: ships ALWAYS move forward at _speed in the direction
+    // of mcShip._rotation. They do not stop at fireRange — they fly through
+    // and around, firing as they pass. Earlier I had them stop at fireRange,
+    // which caused them to pile up just outside laser range.
+    this.x += (dx / d) * this.speed;
+    this.y += (dy / d) * this.speed;
+    if (this.target && d <= this.fireRange) {
       this.fireStep -= 1;
       if (this.fireStep <= 0) {
         this.target.damage(this.attackDamage);
