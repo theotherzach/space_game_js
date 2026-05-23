@@ -1065,7 +1065,11 @@ class Game {
     this.nextWaveTickIndex = 0;
     this.nextWaveAt = this.waveList[0] ? this.waveList[0].delay : 60;
     this.selected = null;
-    this.camera.x = 0; this.camera.y = 0; this.camera.scale = 1; this.camera.targetScale = 1;
+    // start zoomed out so the whole asteroid field fits, then let the user
+    // zoom in. Source uses the same "start at 20%, animate to 100%" pattern;
+    // I just stay at 0.4 since pan/zoom is available immediately.
+    this.camera.x = 0; this.camera.y = 0;
+    this.camera.scale = 0.4; this.camera.targetScale = 0.4;
     const eg = new EnergyGen(0, 0);
     eg.construction = eg.constructionTarget;
     eg.energy = eg.maxEnergy;
@@ -1448,6 +1452,9 @@ class Game {
     for (const s of this.ships) if (s.dead) explode(this, s.x, s.y);
     this.ships = this.ships.filter(s => !s.dead);
     const before = this.buildings.length;
+    for (const b of this.buildings) {
+      if (b.dead) { explode(this, b.x, b.y); explode(this, b.x, b.y); }
+    }
     this.buildings = this.buildings.filter(b => !b.dead);
     if (this.buildings.length !== before || wasDirty) {
       this.recomputeLinks();
