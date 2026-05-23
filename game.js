@@ -848,7 +848,8 @@ class Ship extends Entity {
     this.fireGap = stats.fireGap;
     this.target = null;
     this.spawnedSwarmers = false;
-    this.spawnCooldown = 300;     // motherships hold their swarm for ~10s after spawning
+    this.spawnCooldown = 300;
+    this.facing = 0;              // radians, for rotated rendering
   }
   tick(game) {
     if (!this.target || this.target.dead) {
@@ -893,6 +894,7 @@ class Ship extends Entity {
         this.spawnCooldown = 300;     // every ~10 sim seconds
       }
     }
+    this.facing = Math.atan2(dy, dx);
     if (d > this.fireRange) {
       this.x += (dx / d) * this.speed;
       this.y += (dy / d) * this.speed;
@@ -938,13 +940,18 @@ class Ship extends Entity {
       ctx.moveTo(this.x, this.y - r * 1.4); ctx.lineTo(this.x, this.y + r * 1.4);
       ctx.stroke();
     } else {
-      // default triangle (fighter, missile, swarmer)
+      // default triangle (fighter, missile, swarmer) — rotated to face the
+      // target. Mirrors source's mcShip._rotation update.
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.facing || 0);
       ctx.beginPath();
-      ctx.moveTo(this.x + r, this.y);
-      ctx.lineTo(this.x - r * 0.6, this.y - r * 0.7);
-      ctx.lineTo(this.x - r * 0.6, this.y + r * 0.7);
+      ctx.moveTo(r, 0);
+      ctx.lineTo(-r * 0.6, -r * 0.7);
+      ctx.lineTo(-r * 0.6, r * 0.7);
       ctx.closePath();
       ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
     if (this.hp < this.maxHp) drawHpBar(ctx, this, Math.max(14, r * 1.5));
   }
@@ -958,6 +965,15 @@ function explode(game, x, y) {
 }
 
 // ---------- HUD drawing helpers ----------
+function drawFlashOverlay(ctx, e) {
+  if (!e.flash || e.flash <= 0) return;
+  const r = (e.size || 8) + 2;
+  ctx.globalAlpha = clamp(e.flash / 0.12, 0, 1) * 0.6;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
 function drawConstructionBar(ctx, b) {
   const w = (b.size || 8) * 2;
   ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -1561,8 +1577,14 @@ class Game {
     for (const a of this.asteroids) a.draw(ctx);
     // buildings
     for (const b of this.buildings) b.draw(ctx);
+    // damage flashes and HP bars on damaged buildings
+    for (const b of this.buildings) {
+      drawFlashOverlay(ctx, b);
+      if (b.hp < b.maxHp) drawHpBar(ctx, b, (b.size || 8) * 2);
+    }
     // ships
     for (const s of this.ships) if (!s.dead) s.draw(ctx);
+    for (const s of this.ships) if (!s.dead) drawFlashOverlay(ctx, s);
     // rockets
     for (const r of this.rockets) r.draw(ctx);
     // particles
