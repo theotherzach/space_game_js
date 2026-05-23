@@ -1121,12 +1121,18 @@ class Game {
     const fieldRot = Math.random() * Math.PI;
     for (let i = 0; i < level.asteroids; i++) {
       const a = Math.random() * Math.PI * 2;
-      const ax = Math.cos(a) * (50 + Math.random() * level.fieldScale * 2.5) * 0.3;
-      const ay = Math.sin(a) * (50 + Math.random() * level.fieldScale * 2.5);
+      let ax = Math.cos(a) * (50 + Math.random() * level.fieldScale * 2.5) * 0.3;
+      let ay = Math.sin(a) * (50 + Math.random() * level.fieldScale * 2.5);
+      // source check: relocate if within 50px of origin so we don't spawn
+      // inside the starter energy generator's footprint
+      if (Math.abs(ax) < 50 && Math.abs(ay) < 50) {
+        ax = 100 + Math.random() * 100;
+        ay = 100 + Math.random() * 100;
+      }
       const cx = ax * Math.cos(fieldRot) - ay * Math.sin(fieldRot);
       const cy = ax * Math.sin(fieldRot) + ay * Math.cos(fieldRot);
       const size = 1 + Math.floor(Math.random() * 21);
-      const energy = (5 + size) * 52;     // source formula
+      const energy = (5 + size) * 52;
       out.push(new Asteroid(snap(cx), snap(cy), energy));
     }
     return out;
@@ -1744,6 +1750,25 @@ class Game {
     if (this.placement === "miner") {
       ctx.strokeStyle = "rgba(240, 193, 75, 0.4)";
       ctx.beginPath(); ctx.arc(x, y, MINE_RANGE, 0, Math.PI * 2); ctx.stroke();
+      // highlight asteroids the miner would mine if placed here
+      ctx.setLineDash([]);
+      let inRange = 0;
+      for (const a of this.asteroids) {
+        if (a.dead) continue;
+        if (dist({ x, y }, a) < MINE_RANGE) {
+          inRange += 1;
+          ctx.strokeStyle = "rgba(240, 193, 75, 0.9)";
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(a.x, a.y, a.size + 3, 0, Math.PI * 2); ctx.stroke();
+        }
+      }
+      if (inRange === 0) {
+        ctx.fillStyle = "#ff7466";
+        ctx.font = "11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("no asteroid in range", x, y + r + 14);
+      }
+      ctx.setLineDash([4, 4]);
     } else if (this.placement === "laser") {
       ctx.strokeStyle = "rgba(126, 255, 0, 0.4)";
       ctx.beginPath(); ctx.arc(x, y, LASER_RANGE, 0, Math.PI * 2); ctx.stroke();
