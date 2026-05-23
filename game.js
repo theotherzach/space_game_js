@@ -38,6 +38,11 @@ const ENERGY_HP = 600;
 const LASER_HP = 200;
 const ROCKET_HP = 500;
 
+// Source _size by type (read from each building's constructor)
+const BUILDING_SIZES = {
+  relay: 8, miner: 15, energy: 25, laser: 18, rocket: 14, store: 30, repair: 24,
+};
+
 // Laser turret (subType 0 / standard, from buildingLaser.as)
 const LASER_DAMAGE = 30;
 const LASER_RANGE = 90;
@@ -223,12 +228,15 @@ class Building extends Entity {
 }
 
 // buildingRelay: 100 HP, range 90, forwards energy, can't generate.
+// Source constructor: _size=8, _life=100, _energyRange=90, _constructionTick=2,
+// _targetConstruction=10, _upgrades=0.
 class Relay extends Building {
   constructor(x, y) {
     super(x, y, "relay", RELAY_HP, COSTS.relay);
-    this.size = 8;
+    this.size = 8;                    // source _size
+    this.constructionTick = 2;        // source _constructionTick = 2
     this.relayEnergy = true;
-    this.upgradesRemaining = 0;       // source: relay can't be upgraded
+    this.upgradesRemaining = 0;       // source _upgrades = 0
     this.upgradeCost = 0;
   }
   // source buildingRelay.tick: every frame, request 1 energy, if got>=0.5 add 2 construction
@@ -250,18 +258,20 @@ class Relay extends Building {
   }
 }
 
-// buildingEnergy: 600 HP, max 4 energy, generates 3*efficiency per 10 frames.
+// buildingEnergy. Source: _size=25, _life=600, _maxEnergy=4, _efficiency=0.3,
+// _constructionTick=10, _targetConstruction=10, _upgrades=2, _upgradeCost=200.
 class EnergyGen extends Building {
   constructor(x, y) {
     super(x, y, "energy", ENERGY_HP, COSTS.energy);
-    this.size = 18;
+    this.size = 25;                   // source _size
+    this.constructionTick = 10;       // source _constructionTick
     this.maxEnergy = ENERGY_MAX;
     this.efficiency = ENERGY_EFFICIENCY;
     this.tickStep = 0;
     this.relayEnergy = true;
     this.totalEnergy = 0;
-    this.upgradesRemaining = 2;       // source: 2 upgrades, $200 each
-    this.upgradeCost = 200;
+    this.upgradesRemaining = 2;       // source _upgrades
+    this.upgradeCost = 200;           // source _upgradeCost
   }
   applyUpgrade() {
     // matches buildingEnergy.upgrade(): +5 maxEnergy, +200 HP, eff 0.7→1.0
@@ -312,11 +322,15 @@ class EnergyGen extends Building {
   }
 }
 
-// buildingMiner: 300 HP, mineRange 35, pulse mining, requires 1 energy per pulse, drops 4 each.
+// buildingMiner. Source: _size=15, _life=300, _mineRange=35, _mineRate=60,
+// _mineTicker=60 (starts full so first pulse fires), _mineQuantity=4,
+// _maxEnergy=1, _constructionTick=10, _targetConstruction=10, _upgrades=1,
+// _upgradeCost=100.
 class Miner extends Building {
   constructor(x, y) {
     super(x, y, "miner", MINER_HP, COSTS.miner);
-    this.size = 12;
+    this.size = 15;                   // source _size
+    this.constructionTick = 10;       // source _constructionTick
     this.maxEnergy = MINER_MAX_ENERGY;
     this.mineRange = MINE_RANGE;
     this.mineRate = MINE_RATE;
@@ -326,8 +340,8 @@ class Miner extends Building {
     this.minedOK = true;
     this.planets = [];
     this.laser = null;
-    this.upgradesRemaining = 1;        // source: 1 upgrade at $100
-    this.upgradeCost = 100;
+    this.upgradesRemaining = 1;       // source _upgrades
+    this.upgradeCost = 100;           // source _upgradeCost
   }
   applyUpgrade() {
     // matches buildingMiner.upgrade(): mineQuantity 4→10, +200 HP
@@ -458,7 +472,7 @@ class Asteroid extends Entity {
 class LaserTurret extends Building {
   constructor(x, y) {
     super(x, y, "laser", LASER_HP, COSTS.laser);
-    this.size = 14;
+    this.size = 18;                   // source _size
     this.fireRange = LASER_RANGE;
     this.fireStart = LASER_FIRE_START;
     this.fireCooldown = LASER_FIRE_COOLDOWN;
@@ -469,9 +483,9 @@ class LaserTurret extends Building {
     this.attack = null;
     this.beam = null;
     this.tickStep = 1;
-    this.constructionTick = 15;
-    this.upgradesRemaining = 2;       // source: 2 standard upgrades
-    this.upgradeCost = 150;           // L2 cost from source
+    this.constructionTick = 15;       // source _constructionTick
+    this.upgradesRemaining = 2;       // source _upgrades
+    this.upgradeCost = 150;
   }
   applyUpgrade() {
     // matches buildingLaser.upgrade() L2: damage 30→42, +100 HP
@@ -555,11 +569,13 @@ class LaserTurret extends Building {
   }
 }
 
-// buildingRocket
+// buildingRocket. Source: _size=14, _life=500, _damage=450, _splash=40,
+// _fireRange=400, _rockets=1, _fireRate=1, _maxEnergy=1, _constructionTick=15,
+// _upgrades=2, _upgradeCost=500.
 class RocketTurret extends Building {
   constructor(x, y) {
     super(x, y, "rocket", ROCKET_HP, COSTS.rocket);
-    this.size = 14;
+    this.size = 14;                   // source _size
     this.fireRange = ROCKET_RANGE;
     this.attackDamage = ROCKET_DAMAGE;
     this.splash = ROCKET_SPLASH;
@@ -570,9 +586,9 @@ class RocketTurret extends Building {
     this.attack = null;
     this.maxEnergy = ROCKET_MAX_ENERGY;
     this.tickStep = 4;
-    this.constructionTick = 15;
-    this.upgradesRemaining = 2;
-    this.upgradeCost = 500;
+    this.constructionTick = 15;       // source _constructionTick
+    this.upgradesRemaining = 2;       // source _upgrades
+    this.upgradeCost = 500;           // source _upgradeCost
   }
   applyUpgrade() {
     // matches buildingRocket: +50 damage per level, +200 HP
@@ -665,31 +681,60 @@ class RocketTurret extends Building {
   }
 }
 
+// Source rocket: _speed=1, _maxSpeed=4 (8 if friendly), _easing=2, _fuel=300,
+// target re-acquired every 10 frames if lost. Detonates at distance < 15.
 class Rocket {
   constructor(x, y, target, damage, splash) {
     this.x = x; this.y = y;
     this.target = target;
     this.damage = damage;
     this.splash = splash;
+    this.speed = 1;            // source initial
+    this.maxSpeed = 8;         // source friendly maxSpeed
+    this.facing = Math.atan2(target.y - y, target.x - x);
+    this.fuel = 300;           // source _fuel
     this.dead = false;
   }
   update(game) {
-    if (!this.target || this.target.dead) { this.dead = true; return; }
-    const d = dist(this, this.target);
-    if (d < 10) {
-      this.target.damage(this.damage);
-      // splash to nearby ships
+    this.fuel--;
+    if (this.fuel <= 0) { this.dead = true; explode(game, this.x, this.y); return; }
+    if (this.target && this.target.dead) this.target = null;
+    if (!this.target) {
+      // source: every 10 frames search for a new target within 100
+      let best = null, bestD = Infinity;
       for (const s of game.ships) {
-        if (s === this.target || s.dead) continue;
-        const sd = dist(this, s);
-        if (sd < this.splash) s.damage(this.damage * (1 - sd / this.splash));
+        if (s.dead) continue;
+        const d = dist(this, s);
+        if (d < 100 && d < bestD) { best = s; bestD = d; }
       }
-      this.dead = true;
-      explode(game, this.x, this.y);
-      return;
+      this.target = best;
     }
-    this.x += (this.target.x - this.x) / d * ROCKET_TRAVEL_SPEED;
-    this.y += (this.target.y - this.y) / d * ROCKET_TRAVEL_SPEED;
+    if (this.speed < this.maxSpeed) this.speed += 0.05;
+    if (this.target) {
+      const dx = this.target.x - this.x;
+      const dy = this.target.y - this.y;
+      const d = Math.hypot(dx, dy);
+      // Source rocket easing — gradual rotation toward target
+      const desired = Math.atan2(dy, dx);
+      let drot = desired - this.facing;
+      while (drot > Math.PI) drot -= 2 * Math.PI;
+      while (drot < -Math.PI) drot += 2 * Math.PI;
+      this.facing += drot * 0.5;   // easing=2 → factor 1.5 (snappy but smooth)
+      // Detonate at < 15 (source threshold)
+      if (d < 15) {
+        this.target.damage(this.damage);
+        for (const s of game.ships) {
+          if (s === this.target || s.dead) continue;
+          const sd = dist(this, s);
+          if (sd < this.splash) s.damage(this.damage * (1 - sd / this.splash));
+        }
+        this.dead = true;
+        explode(game, this.x, this.y);
+        return;
+      }
+    }
+    this.x += Math.cos(this.facing) * this.speed;
+    this.y += Math.sin(this.facing) * this.speed;
   }
   draw(ctx) {
     ctx.fillStyle = "#ffd66f";
@@ -709,16 +754,18 @@ class Rocket {
 // when other consumers request, so it's effectively a big energy buffer.
 const STORE_HP = 500;
 const STORE_MAX_ENERGY = 200;
+// buildingStore. Source: _size=30, _life=500, _maxEnergy=200,
+// _constructionTick=10, _upgrades=1, _upgradeCost=500.
 class Store extends Building {
   constructor(x, y) {
     super(x, y, "store", STORE_HP, COSTS.store);
-    this.size = 14;
+    this.size = 30;                   // source _size
     this.maxEnergy = STORE_MAX_ENERGY;
-    this.relayEnergy = true;        // also forwards energy
-    this.upgradesRemaining = 1;
-    this.upgradeCost = 500;
+    this.relayEnergy = true;
+    this.upgradesRemaining = 1;       // source _upgrades
+    this.upgradeCost = 500;           // source _upgradeCost
     this.tickStep = 0;
-    this.constructionTick = 10;
+    this.constructionTick = 10;       // source _constructionTick
   }
   applyUpgrade() {
     this.maxEnergy *= 2;
@@ -767,18 +814,22 @@ const REPAIR_HP = 400;
 const REPAIR_RANGE = 200;
 const REPAIR_TICK = 80;          // frames between heal pulses
 const REPAIR_AMOUNT = 20;
+// buildingRepair. Source: _size=24, _life=400, _maxEnergy=5, _repairRange=200,
+// _targetTick=80, _constructionTick=15, _upgrades=1, _upgradeCost=150.
+// Source uses actual flying _repairBots (drones); my port uses an instant
+// beam for simplicity but with the source's 80-frame cadence.
 class Repair extends Building {
   constructor(x, y) {
     super(x, y, "repair", REPAIR_HP, COSTS.repair);
-    this.size = 12;
-    this.maxEnergy = 5;
+    this.size = 24;                   // source _size
+    this.maxEnergy = 5;               // source _maxEnergy
     this.repairRange = REPAIR_RANGE;
-    this.upgradesRemaining = 1;
-    this.upgradeCost = 150;
+    this.upgradesRemaining = 1;       // source _upgrades
+    this.upgradeCost = 150;           // source _upgradeCost
     this.tickStep = 0;
     this.healTimer = REPAIR_TICK;
-    this.constructionTick = 15;
-    this.lastHealed = null;       // for visual beam
+    this.constructionTick = 15;       // source _constructionTick
+    this.lastHealed = null;
     this.lastHealTimer = 0;
   }
   applyUpgrade() {
@@ -1499,18 +1550,17 @@ class Game {
     const type = this.placement;
     const cost = COSTS[type];
     if (this.minerals < cost) return;
-    // overlap check (matches tempLink: building too close to another that they'd be inside each other)
+    const placingSize = BUILDING_SIZES[type] || 10;
+    // Source tempLink: `if (dist < n._size || dist < node._size) return 0;`
     for (const b of this.buildings) {
       if (b.dead) continue;
       const d = dist({ x, y }, b);
-      if (d < (b.size + 6)) return;
+      if (d < placingSize || d < b.size) return;
     }
-    // miner needs an asteroid in range
     if (type === "miner") {
       const hasOre = this.asteroids.some(a => !a.dead && dist({ x, y }, a) < MINE_RANGE);
       if (!hasOre) return;
     }
-    // must have at least one networkable neighbor (existing building within ENERGY_RANGE)
     if (this.buildings.length > 0) {
       const reachable = this.buildings.some(b => !b.dead && dist({ x, y }, b) <= ENERGY_RANGE);
       if (!reachable) return;
@@ -1605,22 +1655,26 @@ class Game {
     for (const b of this.buildings) b.mines.sort((a, c) => a.depth - c.depth);
   }
 
-  // Walk consumer's `mines` (shallowest first) and drain energy from producers.
-  // Records the path taken so the next draw() can briefly render it (source
-  // does this via `mcRelayLines.createEmptyMovieClip` in requestEnergy).
+  // Source requestEnergy: sorts mines DESCENDING by depth (farthest first),
+  // skips store→store draws, and stops once `needs` is met. Drains real energy
+  // from producers and emits a brief path flash like source's mcRelayLines.
   requestEnergy(node, needs) {
     if (needs <= 0) return 0;
+    // source: _loc6_.sortOn("depth", [Array.DESCENDING | Array.NUMERIC])
+    const mines = node.mines.slice().sort((a, b) => b.depth - a.depth);
     let got = 0;
     let drawnFor = null;
-    for (const m of node.mines) {
+    for (const m of mines) {
       const src = m.mine;
       if (!src || src.dead || src.construction < src.constructionTarget) continue;
+      // source: stores never pull from other stores
+      if (node.type === "store" && src.type === "store") continue;
       if (src.energy <= 0) continue;
       const take = Math.min(src.energy, needs - got);
       if (take > 0) {
         src.energy -= take;
         got += take;
-        if (!drawnFor) drawnFor = m;     // remember the path used
+        if (!drawnFor) drawnFor = m;
       }
       if (got >= needs) break;
     }
@@ -1901,10 +1955,11 @@ class Game {
     // Compute every reason this placement would be rejected (matches tryBuild)
     const reasons = [];
     if (this.minerals < cost) reasons.push("can't afford");
+    const placingSize = BUILDING_SIZES[this.placement] || 10;
     for (const b of this.buildings) {
       if (b.dead) continue;
       const d = dist({ x, y }, b);
-      if (d < (b.size + 6)) { reasons.push(`overlaps ${b.type}`); break; }
+      if (d < placingSize || d < b.size) { reasons.push(`overlaps ${b.type}`); break; }
     }
     if (this.placement === "miner") {
       const hasOre = this.asteroids.some(a => !a.dead && dist({ x, y }, a) < MINE_RANGE);
