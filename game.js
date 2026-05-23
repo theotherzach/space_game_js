@@ -1548,7 +1548,16 @@ class Game {
   draw() {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, W, H);
-    // starfield (parallax-ish: scales but doesn't pan)
+    // distant background nebula — slow parallax
+    if (!this._bgGrad) {
+      const g1 = ctx.createRadialGradient(W * 0.7, H * 0.3, 0, W * 0.7, H * 0.3, 600);
+      g1.addColorStop(0, "rgba(80, 50, 140, 0.18)");
+      g1.addColorStop(1, "rgba(0, 0, 0, 0)");
+      this._bgGrad = g1;
+    }
+    ctx.fillStyle = this._bgGrad;
+    ctx.fillRect(0, 0, W, H);
+    // starfield (parallax)
     for (const s of this.stars) {
       const sx = ((s.x - this.camera.x * 0.15) * this.camera.scale + W / 2 + W * 2) % W;
       const sy = ((s.y - this.camera.y * 0.15) * this.camera.scale + H / 2 + H * 2) % H;
@@ -1652,6 +1661,16 @@ class Game {
       ctx.textAlign = "center";
       ctx.fillText(this.over === "win" ? "MISSION COMPLETE" : "BASE DESTROYED", W / 2, H / 2);
     }
+
+    // vignette
+    if (!this._vignette) {
+      const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.45, W / 2, H / 2, Math.max(W, H) * 0.8);
+      v.addColorStop(0, "rgba(0, 0, 0, 0)");
+      v.addColorStop(1, "rgba(0, 0, 0, 0.5)");
+      this._vignette = v;
+    }
+    ctx.fillStyle = this._vignette;
+    ctx.fillRect(0, 0, W, H);
 
     this.drawMinimap(ctx);
   }
