@@ -933,13 +933,20 @@ class Ship extends Entity {
         this.spawnCooldown = 300;     // every ~10 sim seconds
       }
     }
-    this.facing = Math.atan2(dy, dx);
-    // Source ship1.tick: ships ALWAYS move forward at _speed in the direction
-    // of mcShip._rotation. They do not stop at fireRange — they fly through
-    // and around, firing as they pass. Earlier I had them stop at fireRange,
-    // which caused them to pile up just outside laser range.
-    this.x += (dx / d) * this.speed;
-    this.y += (dy / d) * this.speed;
+    // Source ship1.tick: rotation eases toward target with factor (easing/3).
+    // Movement is always in the direction of the *current* facing — so ships
+    // bank/curve around targets instead of snapping into a straight line.
+    // Without easing, ships fly straight through the base in a frame.
+    const desired = Math.atan2(dy, dx);
+    let drot = desired - this.facing;
+    while (drot > Math.PI) drot -= 2 * Math.PI;
+    while (drot < -Math.PI) drot += 2 * Math.PI;
+    // Source uses easing=40, applied every 3rd frame as delta/(40/3) ≈ 0.075.
+    // Per-frame equivalent ≈ 0.025; tuned to feel like the source banking.
+    this.facing += drot * 0.05;
+    this.x += Math.cos(this.facing) * this.speed;
+    this.y += Math.sin(this.facing) * this.speed;
+    // Fire when within range of target
     if (this.target && d <= this.fireRange) {
       this.fireStep -= 1;
       if (this.fireStep <= 0) {
@@ -1373,6 +1380,12 @@ class Game {
       if (mb) mb.textContent = Sfx.enabled ? "🔊" : "🔇";
     }
     else if (k === "v") this.skipToNextWave();
+    // Speed keys are letters to avoid shadowing the 1-7 build shortcuts the
+    // source defines. , = pause, . = slow, / = normal, p = fast.
+    else if (k === ",") { this.speed = 0;    this.refreshSpeedUI(); }
+    else if (k === ".") { this.speed = 0.5;  this.refreshSpeedUI(); }
+    else if (k === "/") { this.speed = 1;    this.refreshSpeedUI(); }
+    else if (k === "p") { this.speed = 3;    this.refreshSpeedUI(); }
   }
 
   // ---- building & network ----
