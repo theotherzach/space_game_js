@@ -420,7 +420,10 @@ class Asteroid extends Entity {
     this.energy = energy;
     this.maxEnergy = energy;
     this.rawSize = rawSize;
-    this.size = rawSize + 5;       // matches source asteroid._size
+    // source uses rawSize+5 (range 6-26). At our canvas scale and the
+    // MINE_RANGE of 35 those circles dominate the field. Halving the
+    // visible radius keeps the size relationship without crowding.
+    this.size = rawSize * 0.5 + 4;     // range [4.5, 14.5]
   }
   draw(ctx) {
     const t = this.maxEnergy > 0 ? this.energy / this.maxEnergy : 0;
