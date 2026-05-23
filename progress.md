@@ -4,6 +4,53 @@ Running log of changes. Newest at the top. Survives context resets.
 
 ## 2026-05-22
 
+### Session 1, batch 9 — read the source, rewrite to match it
+
+User correctly called out that the prior implementation was guessing,
+not porting. Decompiled `thespacegame.v83.swf` with JPEXS Free Flash
+Decompiler (autoDeobfuscate enabled) — full AS2 class hierarchy at
+`/tmp/v83_deob/scripts/__Packages/` and the game's main DoAction at
+`/tmp/v83_deob/scripts/frame_2/DoAction.as`. Replaced the made-up
+mechanics with the ones the actual game uses:
+
+- **Energy is a flow, not a flag.** Every building stores `energy` /
+  `maxEnergy`. There is a new building type — the energy generator
+  (`EnergyGen`, 600 HP, max 4 energy, 200 cost) — that produces
+  `3 * efficiency` per 10 ticks (efficiency 0.3 at L1). Consumers call
+  `game.requestEnergy(self, needs)` which walks the consumer's
+  precomputed `mines[]` (the BFS path-graph) and drains real energy
+  from producers in depth order.
+- **`path()` reruns** whenever the topology changes (build, sell, or
+  a building finishes constructing). Mirrors `_root.path()` in source.
+- **Mining is pulse-fire.** `mineRate=60`, `mineTicker += 8` per tick;
+  when `mineTicker >= mineRate` AND `energy >= maxEnergy`, the miner
+  drains its 1 energy, picks a random asteroid from its `_planets`
+  list, draws a laser, and extracts `_mineQuantity=4`. If energy can't
+  fill, the miner shows a red ring and waits. Continuous extraction
+  was wrong.
+- **Construction takes time and energy.**
+    - Relay: every tick, request 1 energy. Got ≥ 0.5 → +2 construction.
+    - Miner: every tick, request `maxEnergy - buildEnergy`, accumulate,
+      consume 1 unit per construction step.
+    - Energy gen (L1): every `constructionTick` (10 frames), request 1.
+- **Pan + zoom**: right-click drag pans, wheel zooms 0.2–1.0, WASD
+  pans, Q/E zooms. World coords are now separate from canvas pixels.
+- **Costs match source**: relay 20, miner 45, energy 200, store 300,
+  repair 300, laser 100, rocket 400 (was 15/40/60/150/80).
+- **Position snaps to 5 px grid** (`int(x/5)*5`, matches source).
+- **Removed**: tech tree, booster building, multi-mission scaffolding,
+  research panel, help/mission panels — none of these exist in the
+  original. They'll be replaced with per-building upgrades and the
+  real `levels.as` mission data in subsequent batches.
+
+Still to port (in order):
+1. Laser turret + Rocket turret with splash damage
+2. Six enemy ship types (`ship1`–`ship6`) — fighters, missile ships,
+   exploders, ring ships, swarmers, mother ships
+3. `buildingStore`, `buildingRepair`
+4. Per-building Upgrade UI (each placed building can be upgraded 1-3x)
+5. Real level data from `levels.as`
+
 ### Session 1, batch 8 — hover tooltips + endless high score
 
 - Canvas-rendered hover tooltips for buildings, enemies, and minerals.

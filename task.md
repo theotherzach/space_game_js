@@ -11,53 +11,70 @@ Lives here so it survives context resets.
 - Local: `~/Code/space_game_js`
 - Dev server: `cd ~/Code/space_game_js && python3 -m http.server 8765`
 
-## Shipped
+## Shipped (faithful port from decompiled source)
 
-- Top-down RTS with vanilla Canvas, no framework, no bundler
-- Building types: Connector (15), Miner (40), Turret (60), Laser turret (150), Booster (80)
-- BFS power network from the base; out-of-range buildings go inert
-- Mineral asteroid clusters spawn around the base each run; abundance scales per mission
-- Four enemy types: Raider, Scout (wave 2+), Tank (wave 3+), Bomber (wave 4+, suicide AOE)
-- Turrets carry their damage on each fired bullet so tech buffs don't retroactively boost in-flight rounds
-- Damage flashes on hit, death particles for enemies and buildings, bomber AOE on contact
-- Sell mode: refund 60% of build cost, hover shows the refund preview
-- Speed controls (Pause/Slow/Normal/Fast); Spacebar pause; Esc cancels placement
-- Skip-wave button ("Send wave" / W) collapses the countdown when the field is clear
-- Approach markers: pulsing triangles on the edge in the last 3s of countdown showing where the next wave will arrive
-- Audio: Web Audio oscillator SFX for build/sell/shoot/hit/death/wave/win/lose/research, mute toggle
-- Boosters: aura buffs nearby networked miners (extraction) and turrets (damage + rate of fire); +25% per booster, stacks
-- Tech tree: 3 branches × 3 tiers (Economy / Network / Defense), all linear within branch
-  - Buying re-renders the tree, rescales HP proportionally on existing buildings, recomputes the network
-  - "R" key or Research button opens a modal that auto-pauses the sim
-- **Campaign**: 3 missions (Outpost / Frontier / Heart of the Storm) with escalating goals,
-  starting minerals, mineral abundance, and wave intensity
-- Mission panel with locked/unlocked/current state; win unlocks the next mission
-- Win banner shows mission name + stats (time, minerals, kills, waves) and offers Next/Replay/Missions
-- `localStorage` save (key `space_game_js.save.v1`): persists `researched` set and `unlocked` mission;
-  Reset save button in the mission panel
+- Vanilla HTML / Canvas / JS, no framework, no bundler
+- Source decompiled with JPEXS at `/tmp/v83_deob/` — class hierarchy in
+  `__Packages/` and main game loop in `frame_2/DoAction.as`
+- **Energy graph**: per-building `energy` / `maxEnergy`; `requestEnergy(node, needs)`
+  walks `node.mines[]` (precomputed BFS paths from energy producers) draining
+  energy from producers in depth order. Matches `_root.requestEnergy()` exactly.
+- **Energy generator** (`EnergyGen`): 600 HP, max 4 energy, 200 cost.
+  Generates `3 * efficiency` per 10 ticks (efficiency 0.3 at L1).
+- **Miner**: 300 HP, 45 cost, pulse-mines on a 60-tick clock with
+  `mineTicker += 8/tick`. When timer fires AND energy ≥ maxEnergy, drains
+  energy to 0, picks random asteroid from `_planets`, draws a laser, takes
+  `mineQuantity=4`. Red ring while waiting for energy. Continuous extraction
+  was wrong — this is what the source does.
+- **Relay**: 100 HP, 20 cost, range 90. Network-only, forwards energy.
+- **Construction takes time and energy.** Each building type's port matches
+  source: relay adds +2 per energy received per frame; miner accumulates
+  energy in `buildEnergy` and spends 1 per construction step; energy gen L1
+  needs external energy via the `constructionTick=10` gate.
+- **Pan + zoom**: right-click drag pans the camera, mouse wheel zooms
+  (0.2–1.0), WASD pans, Q/E zoom.
+- **Build cost match source**: relay 20, miner 45, energy 200, store 300,
+  repair 300, laser 100, rocket 400.
+- **5 px grid snap** on placement (matches `int(x/5)*5` in source).
+- Speed controls (Pause / Slow / Normal / Fast), Space pauses, R sells the
+  building under the cursor.
+- Web Audio SFX for shoot, hit, death, build, sell, mining, built, wave,
+  win, lose.
 
-## Known issues / gaps
+## Remaining port work (in order)
 
-- No mobile/touch input support.
-- No volume control (only mute toggle).
-- No drag-place for connectors (one click each).
-- No minimap, single 1024×640 map only.
+1. **Laser turret + Rocket turret.** `buildingLaser.as` and
+   `buildingRocket.as`. Rocket has splash, fire rate 1 per ~unknown,
+   damage 450, splash radius 40. Laser has continuous beam mechanic.
+2. **Six enemy ship types** from `ship1.as` … `ship6.as`:
+   fighters / missile ships / exploders / ring ships / swarmers /
+   mother ships. Each has its own AI in source.
+3. **`buildingStore`** (storage) and **`buildingRepair`** (repairs
+   damaged adjacent buildings).
+4. **Per-building Upgrade UI.** Each placed building has `_upgrades`
+   remaining and an `upgrade()` method that bumps level (1→2→3), HP,
+   damage, etc. Source pattern is: click building → side panel shows
+   upgrade button → click to spend minerals → costs scale per type.
+5. **Real `levels.as` mission data.** Source has 12+ missions starting
+   with two tutorials (mining basics, defense basics). Each mission
+   sets which buildings are buildable, places starter buildings via
+   `autoPlace`, and lays out asteroid fields at scripted positions.
 
-## Open ideas (in rough priority)
+## Decompile workflow
 
-1. Drag-place: hold-shift-and-drag to place many connectors in a line
-2. Mineral cluster visual when a miner is hovered (highlight the cluster being mined)
-3. Volume slider + audio mix tuning (some sounds are louder than necessary)
-4. Multiple map layouts per mission (asymmetric, choke-pointed)
-5. Mobile/touch layout
-6. Possibly: a 5th enemy type — a sniper that picks off the farthest networked building from edge of map
+Source is at `/tmp/v83_deob/`. To re-export with deobfuscation:
 
-## Stopping point
+```
+/opt/homebrew/opt/openjdk/bin/java \
+  -jar /tmp/ffdec/FFDec.app/Contents/Resources/ffdec.jar \
+  -config autoDeobfuscate=true,autoDeobfuscateIdentifiers=true \
+  -export script /tmp/v83_deob \
+  ~/Downloads/space-game/extracted/content/storage.cloud.casualcollective.com/zones/pub/100/thespacegame.v83.swf
+```
 
-Hit reasonable parity with the Flash version's core gameplay loop in 8 batches.
-Original Flash content beyond this scope: asset-based sprites and music,
-deeper upgrade trees with more building tiers, and the campaign continuation
-in *The Space Game: Missions* (the 2010 sequel with more levels).
+`__Packages/<class>.as` files are the cleanest source-of-truth.
+Cross-reference with `frame_2/DoAction.as` for root-level functions
+(`requestEnergy`, `path`, `tempLink`, `fire`, `splash`, `build`).
 
 ## Notes
 

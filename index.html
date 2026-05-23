@@ -10,11 +10,9 @@
   <div id="status">
     <span id="minerals">0</span> minerals
     <span class="sep">·</span>
-    <span id="rate">0</span>/min
-    <span class="sep">·</span>
     <span id="energy">0</span>/<span id="energy-max">0</span> energy
     <span class="sep">·</span>
-    Mission <span id="mission">1</span> <span id="mission-label" class="muted"></span>
+    Mission <span id="mission">1</span>
     <span class="sep">·</span>
     <span id="clock">00:00</span>
     <span class="sep">·</span>
@@ -27,10 +25,6 @@
     <button data-speed="0.5">Slow</button>
     <button data-speed="1" class="active">Normal</button>
     <button data-speed="3">Fast</button>
-    <button id="send-wave" title="Skip the wave countdown (W)">Send wave</button>
-    <button id="research" title="Research (R)">Research</button>
-    <button id="missions" title="Mission select">Missions</button>
-    <button id="help" title="Controls / help (H)">?</button>
     <button id="mute" title="Toggle audio (M)">🔊</button>
     <button id="restart">Restart</button>
   </div>
@@ -39,81 +33,13 @@
 <canvas id="game" width="1024" height="640"></canvas>
 
 <div id="build">
-  <button data-build="connector" title="Connector (C)"><b>Connector</b><span class="cost">15 <em>C</em></span></button>
-  <button data-build="miner" title="Miner (D)"><b>Miner</b><span class="cost">40 <em>D</em></span></button>
-  <button data-build="turret" title="Turret (T)"><b>Turret</b><span class="cost">60 <em>T</em></span></button>
-  <button data-build="laser" title="Laser Turret (L)"><b>Laser</b><span class="cost">150 <em>L</em></span></button>
-  <button data-build="booster" title="Booster (B)"><b>Booster</b><span class="cost">80 <em>B</em></span></button>
-  <button data-build="sell" class="sell" title="Sell mode (X)"><b>Sell</b><span class="cost">refund 60% <em>X</em></span></button>
+  <button data-build="relay" title="Relay (1) — 20 min."><b>Relay</b><span class="cost">20 <em>1</em></span></button>
+  <button data-build="miner" title="Miner (2) — 45 min."><b>Miner</b><span class="cost">45 <em>2</em></span></button>
+  <button data-build="energy" title="Energy (3) — 200 min."><b>Energy</b><span class="cost">200 <em>3</em></span></button>
+  <button data-build="laser" disabled title="Laser turret — coming next batch"><b>Laser</b><span class="cost">100 <em>6</em></span></button>
+  <button data-build="rocket" disabled title="Rocket turret — coming next batch"><b>Rocket</b><span class="cost">400 <em>7</em></span></button>
   <button data-build="cancel" class="cancel">Cancel</button>
-  <span id="hint">Click a building to start placing. Then click on the map.</span>
-</div>
-
-<div id="banner" class="hidden"><div id="banner-text"></div></div>
-
-<div id="help-panel" class="hidden">
-  <div class="help-inner">
-    <div class="help-header">
-      <h2>Controls &amp; Glossary</h2>
-      <button id="help-close" title="Close (Esc)">×</button>
-    </div>
-    <div class="help-cols">
-      <section>
-        <h3>Build</h3>
-        <ul>
-          <li><b>C</b> Connector — extend the power network</li>
-          <li><b>D</b> Miner — extracts from minerals in range</li>
-          <li><b>T</b> Turret — shoots nearest enemy</li>
-          <li><b>L</b> Laser turret — wider range, harder hits</li>
-          <li><b>B</b> Booster — +25% rate to nearby miners/turrets</li>
-          <li><b>X</b> Sell — refund 60% of build cost</li>
-        </ul>
-      </section>
-      <section>
-        <h3>Sim</h3>
-        <ul>
-          <li><b>Space</b> Pause / unpause</li>
-          <li><b>1 / 2 / 3 / 4</b> Pause / Slow / Normal / Fast</li>
-          <li><b>W</b> Send next wave now</li>
-          <li><b>R</b> Research panel</li>
-          <li><b>M</b> Mute audio</li>
-          <li><b>Esc</b> Cancel placement / close panel</li>
-        </ul>
-      </section>
-      <section>
-        <h3>Enemies</h3>
-        <ul>
-          <li><b style="color:#ff5d4d">Raider</b> Standard threat — moderate HP and damage</li>
-          <li><b style="color:#c884ff">Scout</b> Fast and fragile (wave 2+)</li>
-          <li><b style="color:#9a2222">Tank</b> Heavy armor, high damage (wave 3+)</li>
-          <li><b style="color:#ff8800">Bomber</b> Suicide AOE on contact (wave 4+)</li>
-        </ul>
-      </section>
-    </div>
-    <div class="help-footer">All buildings must connect back to the base. Out-of-range = inert. Boosters stack.</div>
-  </div>
-</div>
-
-<div id="mission-panel" class="hidden">
-  <div id="mission-panel-inner">
-    <div id="mission-header">
-      <h2>Missions</h2>
-      <button id="mission-close" title="Close (Esc)">×</button>
-    </div>
-    <div id="mission-list"></div>
-    <div id="mission-footer">Tech research is carried across missions. <button id="reset-save" class="link">Reset save</button></div>
-  </div>
-</div>
-
-<div id="tech-panel" class="hidden">
-  <div id="tech-panel-inner">
-    <div id="tech-header">
-      <h2>Research</h2>
-      <button id="tech-close" title="Close (Esc)">×</button>
-    </div>
-    <div id="tech-tree"></div>
-    <div id="tech-footer">Each tech is a one-time purchase. Game is paused while this panel is open.</div>
-  </div>
+  <span id="hint">Click a building or press 1/2/3. Right-click drag to pan, wheel zooms.</span>
 </div>
 
 <script src="game.js"></script>
