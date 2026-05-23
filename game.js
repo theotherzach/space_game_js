@@ -158,7 +158,13 @@ class Entity {
   damage(dmg) {
     this.hp -= dmg;
     this.flash = 0.12;
-    if (this.hp <= 0) this.dead = true;
+    if (this.hp <= 0) {
+      this.dead = true;
+      // Source ship6: on death, set _life of every child to 0
+      if (this.children && this.children.length) {
+        for (const c of this.children) { c.dead = true; }
+      }
+    }
   }
   tickFlash(dt) {
     if (this.flash > 0) this.flash = Math.max(0, this.flash - dt);
@@ -842,124 +848,202 @@ class Repair extends Building {
   }
 }
 
-// Ship base (enemy). Each shipKind tunes stats and visual.
-// Stats interpreted from ship1..ship6 in /tmp/v83_deob/scripts/__Packages/.
+// Ship base (enemy). Stats are pulled directly from ship1.as…ship7.as
+// constructors at /tmp/v83_deob/scripts/__Packages/.
+// Values: maxSpeed base, maxSpeed random extra, initialSpeedMult, easing,
+// fireRange, fireStep, size, color (source _colour), and HP/damage which
+// are wave-driven by levels.as.
 const SHIP_STATS = {
-  fighter:  { hp: 100, speed: 1.1, damage: 8,   fireRange: 70,  fireGap: 50,  size: 8,  color: "#ff3030", fill: "#3a0a0a" },
-  missile:  { hp:  80, speed: 0.9, damage: 6,   fireRange: 200, fireGap: 70,  size: 8,  color: "#66ff00", fill: "#1a3308" },
-  exploder: { hp:  60, speed: 1.8, damage: 40,  fireRange: 0,   fireGap: 1,   size: 8,  color: "#ff6600", fill: "#33180a", suicide: true },
-  ring:     { hp: 200, speed: 1.4, damage: 10,  fireRange: 60,  fireGap: 60,  size: 11, color: "#ffff00", fill: "#332e08" },
-  swarmer:  { hp:  35, speed: 2.4, damage: 4,   fireRange: 70,  fireGap: 40,  size: 5,  color: "#cccccc", fill: "#222222" },
-  mother:   { hp: 600, speed: 0.6, damage: 12,  fireRange: 200, fireGap: 90,  size: 14, color: "#ff00ff", fill: "#330033", spawnsSwarmers: true },
+  // ship1 fighter
+  fighter:  { maxSpeedBase: 0.8, maxSpeedRand: 0.3, initialMult: 40, easing: 40,  fireRange: 70,  fireStep: 50,  size: 10, color: "#ff0000", fill: "#3a0a0a" },
+  // ship2 missile ship
+  missile:  { maxSpeedBase: 0.8, maxSpeedRand: 0.3, initialMult: 40, easing: 70,  fireRange: 200, fireStep: 50,  size: 10, color: "#66ff00", fill: "#1a3308" },
+  // ship3 exploder (source applies damage *= 1.2 in constructor)
+  exploder: { maxSpeedBase: 1.8, maxSpeedRand: 0.3, initialMult: 19, easing: 45,  fireRange: 70,  fireStep: 50,  size: 10, color: "#ff6600", fill: "#33180a", damageScale: 1.2, exploderShip: true },
+  // ship4 ring ship (has _targetSpeed equal to maxSpeed)
+  ring:     { maxSpeedBase: 2.0, maxSpeedRand: 0.5, initialMult: 15, easing: 70,  fireRange: 60,  fireStep: 180, size: 10, color: "#99ff00", fill: "#1c3308", hasTargetSpeed: true },
+  // ship5 swarmer
+  swarmer:  { maxSpeedBase: 2.8, maxSpeedRand: 0.3, initialMult: 15, easing: 15,  fireRange: 70,  fireStep: 50,  size: 5,  color: "#cccccc", fill: "#222222" },
+  // ship6 mother — fixed maxSpeed, very high initial mult, slow easing, big
+  // sprite. Spawns 5 ship7 once, then stops when in range and fires a pink
+  // laser at damage/50 per frame. Children die when mother dies.
+  mother:   { maxSpeedBase: 0.8, maxSpeedRand: 0,   initialMult: 70, easing: 120, fireRange: 200, fireStep: 180, size: 14, color: "#ff00ff", fill: "#330033", hasTargetSpeed: true, motherShip: true },
+  // ship7 child of mother — fast like swarmer but tied to a mother
+  child:    { maxSpeedBase: 2.8, maxSpeedRand: 0.3, initialMult: 2,  easing: 15,  fireRange: 70,  fireStep: 50,  size: 5,  color: "#ff00ff", fill: "#330033", childShip: true, hpDefault: 100 },
 };
 class Ship extends Entity {
-  constructor(x, y, kind = "fighter", waveScale = 1) {
+  // Per ship.as: _maxSpeed = base + random*rand; _speed = _maxSpeed * initialMult.
+  // _easing varies; rotation is mcShip._rotation, updated every 3rd frame by
+  // delta/(easing/3). Movement is ALWAYS in the direction of current rotation.
+  constructor(x, y, kind = "fighter") {
     const stats = SHIP_STATS[kind] || SHIP_STATS.fighter;
-    super(x, y, stats.hp * waveScale);
+    super(x, y, stats.hpDefault || 100);     // wave overrides on spawn
     this.kind = "ship";
     this.shipKind = kind;
     this.stats = stats;
     this.size = stats.size;
-    this.maxSpeed = stats.speed * (0.9 + Math.random() * 0.2);
-    this.speed = this.maxSpeed;
-    this.attackDamage = stats.damage * waveScale;
+    this.maxSpeed = stats.maxSpeedBase + Math.random() * stats.maxSpeedRand;
+    this.targetSpeed = stats.hasTargetSpeed ? this.maxSpeed : this.maxSpeed;
+    this.speed = this.maxSpeed * stats.initialMult;     // source pattern
+    this.easing = stats.easing;
     this.fireRange = stats.fireRange;
-    this.fireStep = stats.fireGap;
-    this.fireGap = stats.fireGap;
-    this.target = null;
-    this.spawnedSwarmers = false;
-    this.spawnCooldown = 300;
-    this.facing = 0;              // radians, for rotated rendering
+    this.fireStep = stats.fireStep;
+    this.attack = null;
+    this.attackDamage = 0;          // set from wave entry on spawn
+    this.facing = Math.random() * Math.PI * 2;   // initial rotation random
+    this.mmTick = 0;
+    this.retarget = Math.floor(Math.random() * 60);
+    this.spawned = false;           // source ship6 flag — has it spawned children?
+    this.children = [];             // source ship6 children list (ship7 refs)
+    this.SFX = null;
+    this.mother = null;             // for ship7: which mother spawned it
+    this.fuse = 0;                  // for ship3 exploder
   }
+  // Source ship*.tick (verbatim port). Speed decays from initial *N to maxSpeed,
+  // then optionally to targetSpeed. Movement is in direction of current facing.
+  // Rotation eases toward _attack every 3rd frame at delta/(easing/3).
+  // Retarget every 20-30 frames: search nearby player buildings; if none, _goal
+  // (origin). Mother (ship6) spawns 5 children ONCE on first acquisition and
+  // stops to fire a pink laser at damage/50 per frame. Children die with mother.
   tick(game) {
-    // Source ship1.tick: _goal = mcMaps.mcMap.mcMiddle (the world origin).
-    // Non-suicide ships head toward origin first; only break off to attack
-    // when within fireRange of a building. Exploders home in on the closest
-    // building unconditionally — their goal is contact.
-    if (this.stats.suicide) {
-      if (!this.target || this.target.dead) {
-        let best = null, bestD = Infinity;
-        for (const b of game.buildings) {
-          if (b.dead) continue;
-          const d = dist(this, b);
-          if (d < bestD) { best = b; bestD = d; }
-        }
-        this.target = best;
+    // Speed decay (source pattern)
+    if (this.speed > this.maxSpeed) {
+      this.speed -= 1;
+      if (this.speed < this.maxSpeed) this.speed = this.maxSpeed;
+    } else if (this.stats.hasTargetSpeed) {
+      if (this.speed < this.targetSpeed) this.speed += 0.02;
+      else if (this.speed > this.targetSpeed) this.speed -= 0.02;
+    } else if (this.speed < this.maxSpeed) {
+      this.speed += 0.02;
+    }
+
+    // Move forward in current facing
+    this.x += Math.cos(this.facing) * this.speed;
+    this.y += Math.sin(this.facing) * this.speed;
+
+    // Source only rotates / retargets / fires when fully decelerated
+    if (this.speed > this.maxSpeed) {
+      this.mmTick++;
+      return;
+    }
+    this.mmTick++;
+
+    // Rotation update (every 3rd frame, source pattern)
+    if (this.mmTick % 3 === 0) {
+      let dx, dy;
+      if (this.attack && this.attack !== "goal" && !this.attack.dead) {
+        dx = this.attack.x - this.x;
+        dy = this.attack.y - this.y;
+      } else {
+        dx = -this.x;
+        dy = -this.y;
       }
-    } else if (!this.target || this.target.dead || dist(this, this.target) > this.fireRange + 20) {
+      const desired = Math.atan2(dy, dx);
+      let drot = desired - this.facing;
+      while (drot > Math.PI) drot -= 2 * Math.PI;
+      while (drot < -Math.PI) drot += 2 * Math.PI;
+      this.facing += drot / (this.easing / 3);
+    }
+
+    // Retarget periodically (source: _retarget timer)
+    if ((!this.attack || this.attack === "goal" || this.attack.dead) && this.retarget <= 0) {
       let best = null, bestD = Infinity;
       for (const b of game.buildings) {
         if (b.dead) continue;
-        const d = dist(this, b);
-        if (d <= this.fireRange + 20 && d < bestD) { best = b; bestD = d; }
+        const dd = dist(this, b);
+        if (dd <= this.fireRange && dd < bestD) { best = b; bestD = dd; }
       }
-      this.target = best;
-    }
-    let dx, dy, d;
-    if (this.target) {
-      dx = this.target.x - this.x;
-      dy = this.target.y - this.y;
-    } else {
-      dx = -this.x;
-      dy = -this.y;     // head to origin (0,0)
-    }
-    d = Math.hypot(dx, dy) || 1;
-    if (this.stats.suicide) {
-      // exploder: closes distance and detonates AOE
-      if (d > 12) {
-        this.x += (dx / d) * this.speed;
-        this.y += (dy / d) * this.speed;
+      if (best) {
+        this.attack = best;
+        this.fireStep = 10 + Math.floor(Math.random() * 2);
+        if (this.stats.motherShip) {
+          this.targetSpeed = 0;     // mother stops to fire
+          if (this.spawned) {
+            for (const c of this.children) if (!c.dead) c.attack = this.attack;
+          } else {
+            this.spawned = true;
+            // Source ship6: attachMovie("ship7", ..., {_damage: 10, _goal: this, _attack, _mother: this})
+            for (let i = 0; i < 5; i++) {
+              const child = new Ship(this.x, this.y, "child");
+              child.attack = this.attack;
+              child.mother = this;
+              child.attackDamage = 10;
+              child.hp = 100; child.maxHp = 100;
+              this.children.push(child);
+              game.ships.push(child);
+            }
+          }
+        }
       } else {
-        // AOE damage to all nearby buildings
-        for (const b of game.buildings) {
-          if (b.dead) continue;
-          const bd = dist(this, b);
-          if (bd < 60) b.damage(this.attackDamage * (1 - bd / 60));
+        this.attack = "goal";
+        if (this.stats.motherShip) {
+          this.targetSpeed = this.maxSpeed;
+          if (this.spawned) {
+            for (const c of this.children) if (!c.dead) c.attack = this;
+          }
         }
-        explode(game, this.x, this.y);
-        this.dead = true;
-        Sfx.play("death");
       }
-      return;
+      this.retarget = this.stats.motherShip ? 30 : (20 + Math.floor(Math.random() * 10));
     }
-    if (this.stats.spawnsSwarmers) {
-      this.spawnCooldown -= 1;
-      if (this.spawnCooldown <= 0) {
-        for (let i = 0; i < 2; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const child = new Ship(this.x + Math.cos(a) * 30, this.y + Math.sin(a) * 30, "swarmer");
-          // Inherit the parent's wave-scaled damage so baby swarmers don't
-          // bypass the level's damage curve (wave 1 has damage 0)
-          child.attackDamage = this.attackDamage;
-          game.ships.push(child);
+    this.retarget--;
+
+    // Fire / laser
+    if (this.attack && this.attack !== "goal" && !this.attack.dead) {
+      if (this.stats.motherShip) {
+        // Source: when speed <= 0.2, fire continuous laser at damage/50/frame
+        if (this.speed <= 0.2) {
+          this.speed = 0;
+          this.attack.damage(this.attackDamage / 50);
+          this.beam = { tx: this.attack.x, ty: this.attack.y, life: 3, colour: "#ff00ff" };
         }
-        this.spawnCooldown = 300;     // every ~10 sim seconds
+      } else if (this.stats.exploderShip) {
+        // Source ship3: while attack != goal, fuse increments per frame.
+        // Speed decays at 0.05/frame, easing tightens to 10. At fuse > 60
+        // (2 sim seconds), call splash(attack, 100, _damage, 0) and die.
+        if (this.fuse > 60) {
+          // Splash radius 100, full damage at center, falloff linearly
+          for (const b of game.buildings) {
+            if (b.dead) continue;
+            const bd = dist(this, b);
+            if (bd < 100) b.damage(this.attackDamage * (1 - bd / 100));
+          }
+          explode(game, this.x, this.y);
+          this.dead = true;
+          Sfx.play("death");
+        } else {
+          this.fuse++;
+          this.speed = Math.max(0, this.speed - 0.05);
+          this.easing = 10;
+        }
+      } else {
+        this.fireStep--;
+        if (this.fireStep <= 0) {
+          this.attack.damage(this.attackDamage);
+          this.fireStep = this.stats.fireStep;
+          this.beam = { tx: this.attack.x, ty: this.attack.y, life: 2, colour: this.stats.color };
+          Sfx.play("hit");
+        }
       }
+    } else if (this.stats.exploderShip) {
+      // Lost target: fuse resets, easing reverts to base
+      this.fuse = 0;
+      this.easing = this.stats.easing;
     }
-    // Source ship1.tick: rotation eases toward target with factor (easing/3).
-    // Movement is always in the direction of the *current* facing — so ships
-    // bank/curve around targets instead of snapping into a straight line.
-    // Without easing, ships fly straight through the base in a frame.
-    const desired = Math.atan2(dy, dx);
-    let drot = desired - this.facing;
-    while (drot > Math.PI) drot -= 2 * Math.PI;
-    while (drot < -Math.PI) drot += 2 * Math.PI;
-    // Source uses easing=40, applied every 3rd frame as delta/(40/3) ≈ 0.075.
-    // Per-frame equivalent ≈ 0.025; tuned to feel like the source banking.
-    this.facing += drot * 0.05;
-    this.x += Math.cos(this.facing) * this.speed;
-    this.y += Math.sin(this.facing) * this.speed;
-    // Fire when within range of target
-    if (this.target && d <= this.fireRange) {
-      this.fireStep -= 1;
-      if (this.fireStep <= 0) {
-        this.target.damage(this.attackDamage);
-        this.fireStep = this.fireGap;
-        Sfx.play("hit");
-      }
+
+    if (this.beam) {
+      this.beam.life--;
+      if (this.beam.life <= 0) this.beam = null;
     }
   }
   draw(ctx) {
+    // Beam first so the ship sprite sits on top
+    if (this.beam && this.attack && this.attack !== "goal") {
+      ctx.strokeStyle = this.beam.colour || this.stats.color;
+      ctx.lineWidth = this.stats.motherShip ? 3 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y); ctx.lineTo(this.beam.tx, this.beam.ty);
+      ctx.stroke();
+    }
     const r = this.size;
     ctx.fillStyle = this.stats.fill;
     ctx.strokeStyle = this.stats.color;
@@ -1280,10 +1364,11 @@ class Game {
       const sx = Math.cos(a) * spawnR;
       const sy = Math.sin(a) * spawnR;
       const s = new Ship(sx, sy, entry.kind);
-      // override HP and damage from the wave entry (source formula values)
+      // Wave-entry HP and damage (source formula values)
       s.maxHp = entry.hp;
       s.hp = entry.hp;
-      s.attackDamage = entry.damage;
+      // Source ship3 constructor multiplies _damage by 1.2; apply on spawn.
+      s.attackDamage = entry.damage * (s.stats.damageScale || 1);
       this.ships.push(s);
     }
     this.nextWaveTickIndex += 1;
