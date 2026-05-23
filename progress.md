@@ -4,6 +4,35 @@ Running log of changes. Newest at the top. Survives context resets.
 
 ## 2026-05-22
 
+### Session 1, batch 14 — campaign, minimap, polish
+
+- **Campaign expanded**: 9 missions now. Easy / Normal / Hard / Madness /
+  Survivor Gentle / Survivor Bring it / Survivor No Hope / Speed Miner /
+  Sandbox. Madness ported from level 6 with faster waves and tighter
+  damage curve. Survivor uses cumulative-delay shrinking-gap timing
+  from levels 8-10. Speed Miner computes goal from total field energy.
+  Sandbox is a peaceful unlimited-minerals layout.
+- **Wave timing fix**: source delays are absolute seconds at level start,
+  not cumulative ticks. The dispatcher now fires every entry whose
+  delay has elapsed each tick, so the six same-delay round entries
+  arrive as a salvo.
+- **Send-wave** (button + V key) shifts every remaining wave's delay
+  so the next one fires in 0.5s. Useful because Easy mode opens with
+  ~85s of setup time.
+- **Energy-flow flashes**: when `requestEnergy` succeeds, a brief cyan
+  line is drawn from the consumer through its `mines` path to the
+  producer. Matches source `mcRelayLines.createEmptyMovieClip` pattern.
+- **Minimap** bottom-right: asteroids (green), buildings (per-type
+  color), ships (red), and a viewport rectangle. Click anywhere on it
+  to jump the camera. Mirrors source `mcMinimap`.
+- **Camera starts zoomed out to 0.4** so the whole asteroid field is
+  visible at level start; players zoom in to specific areas.
+- **HUD compressed** to a single line that doesn't wrap.
+
+### Session 1, batch 13 — ship variety + per-building upgrade UI
+
+(See above for ship work and upgrade panel)
+
 ### Session 1, batch 12 — Store, Repair, real level data
 
 Ported the last two source buildings and replaced my arbitrary mission

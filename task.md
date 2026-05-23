@@ -43,25 +43,25 @@ Lives here so it survives context resets.
 
 ## Remaining port work (in rough priority)
 
-The core port is shipped. Everything below is polish or non-core
-content from the source that wasn't worth a session of mine yet.
+The core port is shipped: 9 missions, 7 building types, 6 enemy types,
+real energy graph + pulse mining + construction time + pan/zoom +
+minimap + per-building upgrades + wave salvos + energy-flow flashes.
 
-1. **Tutorial levels (1 and 2)** with `mcTutorial` overlays from
-   source. Both gate building types and auto-place starter buildings
-   to teach mining + defense step-by-step.
-2. **Higher-numbered levels (6, 8, 9, 10, 11, 12, 13, 101…)** —
-   source has 12+ scripted missions beyond Easy/Normal/Hard.
+1. **Tutorial levels (1 and 2)** with `mcTutorial` overlays from the
+   source. Gate building types and auto-place starter buildings.
+2. **Wave Mode (level 11)** and **mission packs 101+**. Source has 12+
+   scripted missions and a "Wave Mode" with different goal logic
+   (`_loc9_ >= _waves[N][0]` is a mineral-percentage gate).
 3. **Laser sub-upgrades** `pulse` and `plasma`. Source forks the
    laser upgrade tree: pressing P or T at L1 picks pulse-laser (rapid
-   fire, fewer ticks/round) or plasma-laser (charge-up beam, huge
-   damage on release). Currently we just port the standard line.
+   fire) or plasma-laser (charge-up beam). Currently only the standard
+   line is ported.
 4. **Repair drones**. Source has actual flying drones (`_repairBots`)
-   that travel out from the repair bay. We're rendering an
-   instant beam instead.
-5. **Mother ship subship (`ship7`)** spawned by ship6. The current
-   port has mother spawn `swarmer` instead.
-6. **Minimap** (`mcMinimap`) and **wave bar messages** showing what's
-   in the upcoming wave.
+   that travel out from the repair bay. We render an instant beam.
+5. **Mother ship subship (`ship7`)** spawned by ship6. The port has
+   mother spawn `swarmer` instead.
+6. **Wave bar messages** showing what's in the upcoming wave (the
+   `waveBar()` function in source).
 7. **Save / persistent unlock** across page reload.
 
 ## Decompile workflow
