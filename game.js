@@ -61,9 +61,18 @@ const SHIP_FIGHTER_DAMAGE = 8;
 // Mission data, ported from `levels.as`. Source uses level 1-2 as tutorials
 // and levels 3-5 as the full campaign. We ship 3-5 as missions 1-3.
 const LEVELS = [
-  { id: 1, name: "Easy Mode",   minerals: 1000, goal: 15000, asteroids: 50, fieldScale: 400, waveDelayMult: 75, hpBase: 10,  countCap: 40,  hpCap: 9999, damageDiv: 9, divs:  [1.5, 2, 2, 3, "fixed3"] },
-  { id: 2, name: "Normal Mode", minerals: 1200, goal: 30000, asteroids: 60, fieldScale: 500, waveDelayMult: 70, hpBase: 10,  countCap: 100, hpCap: 9999, damageDiv: 8, divs:  [1.5, 2, 2, 2, "fixed5"] },
-  { id: 3, name: "Hard Mode",   minerals: 2000, goal: 40000, asteroids: 80, fieldScale: 600, waveDelayMult: 70, hpBase: 10,  countCap: 100, hpCap: 9999, damageDiv: 8, divs:  [1.5, 2, 2, 1.8, "fixed8"], countMul: 8, countOffset: 7 },
+  { id: 1, name: "Easy Mode",   minerals: 1000, goal: 15000, asteroids: 50, fieldScale: 400, waveDelayMult: 75, hpBase: 10, countCap: 40,  damageDiv: 9 },
+  { id: 2, name: "Normal Mode", minerals: 1200, goal: 30000, asteroids: 60, fieldScale: 500, waveDelayMult: 70, hpBase: 10, countCap: 100, damageDiv: 8 },
+  { id: 3, name: "Hard Mode",   minerals: 2000, goal: 40000, asteroids: 80, fieldScale: 600, waveDelayMult: 70, hpBase: 10, countCap: 100, damageDiv: 8, countMul: 8, countOffset: 7 },
+  { id: 4, name: "Madness!",    minerals: 2500, goal: 40000, asteroids: 85, fieldScale: 650, waveDelayMult: 45, hpBase: 10, countCap: 100, damageDiv: 6, countMul: 10, countOffset: 7, damageCap: 8 },
+  // Survivor levels: goal=0 (no win), accelerating waves with shrinking gap
+  { id: 5, name: "Survivor: Gentle",  minerals: 2000, goal: 0, asteroids: 60, fieldScale: 600, hpBase: 10, countCap: 100, damageDiv: 8, survivor: { startDelay: 80, gap: 70, minGap: 25 }, endless: true },
+  { id: 6, name: "Survivor: Bring it",minerals: 2000, goal: 0, asteroids: 70, fieldScale: 650, hpBase: 10, countCap: 100, damageDiv: 8, survivor: { startDelay: 70, gap: 65, minGap: 20 }, endless: true },
+  { id: 7, name: "Survivor: No Hope", minerals: 2000, goal: 0, asteroids: 80, fieldScale: 700, hpBase: 10, countCap: 100, damageDiv: 7, survivor: { startDelay: 60, gap: 60, minGap: 18 }, endless: true },
+  // Speed Miner: small field, goal = total field energy, no enemies
+  { id: 8, name: "Speed Miner", minerals: 2000, goal: 0, asteroids: 25, fieldScale: 200, peaceful: true, computeGoalFromField: true },
+  // Sandbox: lots of minerals, no enemies, no goal
+  { id: 9, name: "Sandbox",     minerals: 99999, goal: 0, asteroids: 80, fieldScale: 600, peaceful: true, endless: true },
 ];
 
 // Map source ship_type integer (1-6) to my SHIP_STATS keys.
@@ -1055,7 +1064,9 @@ class Game {
     this.particles = [];
     this.minerals = this.level.minerals;
     this.totalMined = 0;
-    this.goal = this.level.goal;
+    this.goal = this.level.computeGoalFromField
+      ? this.asteroids.reduce((s, a) => s + a.energy, 0)
+      : this.level.goal;
     this.time = 0;
     this.tickCount = 0;
     this.speed = 1;
@@ -1102,42 +1113,55 @@ class Game {
 
   // Wave generator ports the Easy/Normal/Hard formulas from levels.as.
   // Each wave = { delay (ticks from sim start), kind, count, hp, damage, angle }.
-  // Wave list ported from `levels.as`. Each entry stores an *absolute*
-  // delay in seconds; within a round the six slots all share the same
-  // delay and fire as a salvo (one entry per frame past the threshold).
+  // Wave list ported from `levels.as`. Easy/Normal/Hard/Madness use a
+  // round-based scheme where each round of 6 slots shares one absolute
+  // delay. Survivor modes use cumulative timing with a shrinking gap.
   buildWaveList(level) {
+    if (level.peaceful) return [];           // sandbox / speed miner
     const list = [];
+    const isSurvivor = !!level.survivor;
+    const survivor = level.survivor || {};
     let w = 1, slot = 1;
-    while (w < 50) {
+    let acc = survivor.startDelay || 0;
+    let gap = survivor.gap || 0;
+    const maxW = isSurvivor ? 120 : (level.id === 4 ? 100 : 50);
+    while (w < maxW) {
       let count;
-      if (level.id === 3) count = 7 + w * 8;
+      if (level.countMul) count = (level.countOffset || 0) + w * level.countMul;
       else if (level.id === 2) count = w * 6;
       else count = w * 5;
       if (count > level.countCap) count = level.countCap;
-      const damage = Math.min(6, Math.floor(0.8 + w / level.damageDiv));
+      let damage = Math.floor(0.8 + w / level.damageDiv);
+      if (level.damageCap && damage > level.damageCap) damage = level.damageCap;
+      if (!level.damageCap) damage = Math.min(6, damage);
       let hp = w * level.hpBase;
       if (slot === 2) { count = count / 1.5; hp = hp * 2; }
       if (slot === 3) { count = count / 2;   hp = hp * 2; }
       if (slot === 4) { count = count / 2;   hp = hp / 2; }
       if (slot === 5) {
-        if (level.id === 3) count /= 1.8;
+        if (level.id === 3 || level.id === 4) count /= 1.8;
         else if (level.id === 2) count /= 2;
         else count /= 3;
         hp = 20;
       }
       if (slot === 6) {
-        if (level.id === 3) { count = 8; hp = 360; }
+        if (level.id === 3 || level.id === 4) { count = 8; hp = 360; }
         else if (level.id === 2) { count = 5; hp = 180; }
         else { count = 3; hp = 90; }
       }
+      const delay = isSurvivor ? acc : (w * (level.waveDelayMult || 70) + 10);
       list.push({
-        delay: w * level.waveDelayMult + 10,    // absolute seconds from start
+        delay,
         kind: SHIP_KIND_BY_SUBTYPE[slot] || "fighter",
         count: Math.max(1, Math.floor(count)),
         hp,
         damage,
         angle: Math.random() * Math.PI * 2,
       });
+      if (isSurvivor) {
+        acc += gap;
+        if (gap > (survivor.minGap || 20)) gap -= 1;
+      }
       slot += 1;
       if (slot > 6) { slot = 1; w += 1; }
     }
@@ -1465,7 +1489,7 @@ class Game {
       for (const b of this.buildings) if (b instanceof Miner) b.refreshPlanets(this);
     }
     // win / lose
-    if (this.totalMined >= this.goal) { this.over = "win"; Sfx.play("win"); }
+    if (this.goal > 0 && this.totalMined >= this.goal) { this.over = "win"; Sfx.play("win"); }
     if (this.buildings.length === 0) { this.over = "lose"; Sfx.play("lose"); }
     // if the selected building died, clear selection
     if (this.selected && this.selected.dead) this.selected = null;
