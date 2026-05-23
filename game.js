@@ -1802,14 +1802,43 @@ class Game {
   drawPlacementPreview(ctx) {
     const x = snap(this.mouse.wx), y = snap(this.mouse.wy);
     const cost = COSTS[this.placement];
-    const ok = this.minerals >= cost;
+    const sizeByType = { relay: 8, miner: 12, energy: 18, laser: 12, rocket: 14, store: 14, repair: 12 };
+    const r = sizeByType[this.placement] || 10;
+
+    // Compute every reason this placement would be rejected (matches tryBuild)
+    const reasons = [];
+    if (this.minerals < cost) reasons.push("can't afford");
+    for (const b of this.buildings) {
+      if (b.dead) continue;
+      const d = dist({ x, y }, b);
+      if (d < (b.size + 6)) { reasons.push(`overlaps ${b.type}`); break; }
+    }
+    if (this.placement === "miner") {
+      const hasOre = this.asteroids.some(a => !a.dead && dist({ x, y }, a) < MINE_RANGE);
+      if (!hasOre) reasons.push("no asteroid in range");
+    }
+    if (this.buildings.length > 0) {
+      const reachable = this.buildings.some(b => !b.dead && dist({ x, y }, b) <= ENERGY_RANGE);
+      if (!reachable) reasons.push("not in energy network");
+    }
+    const blocked = reasons.length > 0;
+
     // ghost building
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = ok ? "rgba(111, 209, 255, 0.85)" : "rgba(255, 116, 102, 0.85)";
-    ctx.fillStyle = "rgba(111, 209, 255, 0.1)";
-    const sizeByType = { relay: 8, miner: 12, energy: 18, laser: 12, rocket: 14 };
-    const r = sizeByType[this.placement] || 10;
+    ctx.strokeStyle = blocked ? "rgba(255, 116, 102, 0.95)" : "rgba(111, 209, 255, 0.85)";
+    ctx.fillStyle = blocked ? "rgba(255, 116, 102, 0.18)" : "rgba(111, 209, 255, 0.1)";
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (blocked) {
+      // X mark + reason text
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.6, y - r * 0.6); ctx.lineTo(x + r * 0.6, y + r * 0.6);
+      ctx.moveTo(x + r * 0.6, y - r * 0.6); ctx.lineTo(x - r * 0.6, y + r * 0.6);
+      ctx.stroke();
+      ctx.fillStyle = "#ff7466";
+      ctx.font = "11px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(reasons[0], x, y + r + 14);
+    }
     // energy range
     ctx.setLineDash([4, 4]);
     ctx.strokeStyle = "rgba(111, 209, 255, 0.3)";
@@ -1817,23 +1846,15 @@ class Game {
     if (this.placement === "miner") {
       ctx.strokeStyle = "rgba(240, 193, 75, 0.4)";
       ctx.beginPath(); ctx.arc(x, y, MINE_RANGE, 0, Math.PI * 2); ctx.stroke();
-      // highlight asteroids the miner would mine if placed here
       ctx.setLineDash([]);
-      let inRange = 0;
+      // highlight asteroids the miner would mine if placed here
       for (const a of this.asteroids) {
         if (a.dead) continue;
         if (dist({ x, y }, a) < MINE_RANGE) {
-          inRange += 1;
           ctx.strokeStyle = "rgba(240, 193, 75, 0.9)";
           ctx.lineWidth = 2;
           ctx.beginPath(); ctx.arc(a.x, a.y, a.size + 3, 0, Math.PI * 2); ctx.stroke();
         }
-      }
-      if (inRange === 0) {
-        ctx.fillStyle = "#ff7466";
-        ctx.font = "11px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("no asteroid in range", x, y + r + 14);
       }
       ctx.setLineDash([4, 4]);
     } else if (this.placement === "laser") {
