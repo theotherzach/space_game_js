@@ -4,6 +4,49 @@ Running log of changes. Newest at the top. Survives context resets.
 
 ## 2026-05-22
 
+### Session 1, batch 12 — Store, Repair, real level data
+
+Ported the last two source buildings and replaced my arbitrary mission
+scaffolding with the actual `levels.as` data.
+
+- **Store** (300 cost, 500 HP, max 200 energy). Pulls from the network
+  when there's surplus and acts as a producer when consumers request
+  energy: BFS roots now include all constructed stores, and
+  `requestEnergy` short-circuits when a producer's `energy <= 0`.
+  1 upgrade at 500 minerals → doubles buffer + 200 HP.
+- **Repair** (300 cost, 400 HP, range 200, heals 20 HP per pulse every
+  80 frames). Mirrors `buildingRepair.as`: picks the most-damaged
+  building in range each pulse, spends 1 energy. 1 upgrade at 150 →
+  +50 range +200 HP. Heal beam rendered to the patient.
+- **Real campaign data** from `levels.as`: 3 missions (Easy/Normal/Hard,
+  source levels 3/4/5 — the two tutorial levels are not ported).
+  Each level sets minerals, goal, asteroid count + field scale.
+- **Asteroid field generator** matches `asteroidField.genAsteroids()`:
+  rotated ellipse where X is squashed to 30% so the field forms a long
+  band; size 1-21, energy = (5+size) × 52.
+- **Wave data format** matches source: `[delay, shipType, count, hp,
+  damage, angle]`. The 6-slot scheduler cycles fighter/missile/exploder/
+  ring/swarmer/mother with the per-type count and HP modifiers from
+  source. Easy/Normal/Hard have different base counts and damage
+  divisors.
+
+### Session 1, batch 11 — ship variety + per-building upgrade UI
+
+- 6 ship types (`SHIP_STATS` table sourced from ship1.as…ship6.as).
+- Per-building upgrade UI: click a building → side panel with stats +
+  Upgrade and Sell buttons. `applyUpgrade()` per class mirrors source
+  `upgrade()` (miner `_mineQuantity` 4→10 +200 HP; energy gen +5
+  maxEnergy and efficiency 0.7→1.0; laser +12 damage; rocket +50 damage
+  and an extra rocket per burst). Upgrading adds 5 to `targetConstruction`
+  so the building briefly returns to construction.
+
+### Session 1, batch 10 — laser + rocket + first enemy
+
+- Laser turret with pulse-fire cycle from `buildingLaser.as` subType 0
+  and Rocket turret with splash + per-shot 5-mineral cost from
+  `buildingRocket.as`. Ship base class + fighter from `ship1.as`. Wave
+  spawner with timer.
+
 ### Session 1, batch 9 — read the source, rewrite to match it
 
 User correctly called out that the prior implementation was guessing,

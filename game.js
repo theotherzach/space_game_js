@@ -58,6 +58,17 @@ const ROCKET_TRAVEL_SPEED = 6;          // px per tick
 const SHIP_FIGHTER_HP = 100;
 const SHIP_FIGHTER_DAMAGE = 8;
 
+// Mission data, ported from `levels.as`. Source uses level 1-2 as tutorials
+// and levels 3-5 as the full campaign. We ship 3-5 as missions 1-3.
+const LEVELS = [
+  { id: 1, name: "Easy Mode",   minerals: 1000, goal: 15000, asteroids: 50, fieldScale: 400, waveDelayMult: 75, hpBase: 10,  countCap: 40,  hpCap: 9999, damageDiv: 9, divs:  [1.5, 2, 2, 3, "fixed3"] },
+  { id: 2, name: "Normal Mode", minerals: 1200, goal: 30000, asteroids: 60, fieldScale: 500, waveDelayMult: 70, hpBase: 10,  countCap: 100, hpCap: 9999, damageDiv: 8, divs:  [1.5, 2, 2, 2, "fixed5"] },
+  { id: 3, name: "Hard Mode",   minerals: 2000, goal: 40000, asteroids: 80, fieldScale: 600, waveDelayMult: 70, hpBase: 10,  countCap: 100, hpCap: 9999, damageDiv: 8, divs:  [1.5, 2, 2, 1.8, "fixed8"], countMul: 8, countOffset: 7 },
+];
+
+// Map source ship_type integer (1-6) to my SHIP_STATS keys.
+const SHIP_KIND_BY_SUBTYPE = ["fighter", "fighter", "missile", "exploder", "ring", "swarmer", "mother"];
+
 // ---------- audio ----------
 const SOUNDS = {
   shoot:  { type: "square",   f0: 800, f1: 220, d: 0.06, v: 0.05 },
@@ -655,6 +666,149 @@ class Rocket {
   }
 }
 
+// buildingStore — fills itself from the energy network and acts as a producer
+// when other consumers request, so it's effectively a big energy buffer.
+const STORE_HP = 500;
+const STORE_MAX_ENERGY = 200;
+class Store extends Building {
+  constructor(x, y) {
+    super(x, y, "store", STORE_HP, COSTS.store);
+    this.size = 14;
+    this.maxEnergy = STORE_MAX_ENERGY;
+    this.relayEnergy = true;        // also forwards energy
+    this.upgradesRemaining = 1;
+    this.upgradeCost = 500;
+    this.tickStep = 0;
+    this.constructionTick = 10;
+  }
+  applyUpgrade() {
+    this.maxEnergy *= 2;
+    this.hp += 200;
+    this.maxHp += 200;
+  }
+  tick(game) {
+    if (this.construction < this.constructionTarget) {
+      this.constructionStep += 1;
+      if (this.constructionStep >= this.constructionTick) {
+        this.constructionStep = 0;
+        this.buildEnergy += game.requestEnergy(this, 1);
+        if (this.buildEnergy >= 1) {
+          this.buildEnergy -= 1;
+          this.construction += 1;
+          if (this.construction >= this.constructionTarget) this.finishConstruction();
+        }
+      }
+      return;
+    }
+    // pull excess energy from the network until full
+    this.tickStep -= 1;
+    if (this.tickStep <= 0) {
+      this.tickStep = 4;
+      if (this.energy < this.maxEnergy) {
+        this.energy += game.requestEnergy(this, this.maxEnergy - this.energy);
+        if (this.energy > this.maxEnergy) this.energy = this.maxEnergy;
+      }
+    }
+  }
+  draw(ctx) {
+    ctx.fillStyle = this.networked ? "#1b1d2c" : "#0e1018";
+    ctx.strokeStyle = this.networked ? "#a0bcff" : "#3a4a72";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // fill level
+    const t = this.maxEnergy > 0 ? this.energy / this.maxEnergy : 0;
+    ctx.fillStyle = `rgba(160, 188, 255, ${0.35 + 0.5 * t})`;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size * 0.55 * (0.4 + 0.6 * t), 0, Math.PI * 2); ctx.fill();
+    if (this.construction < this.constructionTarget) drawConstructionBar(ctx, this);
+  }
+}
+
+// buildingRepair — heals damaged networked buildings within `repairRange`.
+const REPAIR_HP = 400;
+const REPAIR_RANGE = 200;
+const REPAIR_TICK = 80;          // frames between heal pulses
+const REPAIR_AMOUNT = 20;
+class Repair extends Building {
+  constructor(x, y) {
+    super(x, y, "repair", REPAIR_HP, COSTS.repair);
+    this.size = 12;
+    this.maxEnergy = 5;
+    this.repairRange = REPAIR_RANGE;
+    this.upgradesRemaining = 1;
+    this.upgradeCost = 150;
+    this.tickStep = 0;
+    this.healTimer = REPAIR_TICK;
+    this.constructionTick = 15;
+    this.lastHealed = null;       // for visual beam
+    this.lastHealTimer = 0;
+  }
+  applyUpgrade() {
+    this.repairRange += 50;
+    this.hp += 200;
+    this.maxHp += 200;
+  }
+  tick(game) {
+    if (this.construction < this.constructionTarget) {
+      this.constructionStep += 1;
+      if (this.constructionStep >= this.constructionTick) {
+        this.constructionStep = 0;
+        this.buildEnergy += game.requestEnergy(this, 1);
+        if (this.buildEnergy >= 1) {
+          this.buildEnergy -= 1;
+          this.construction += 1;
+          if (this.construction >= this.constructionTarget) this.finishConstruction();
+        }
+      }
+      return;
+    }
+    if (this.energy < this.maxEnergy) {
+      this.energy += game.requestEnergy(this, this.maxEnergy - this.energy);
+      if (this.energy > this.maxEnergy) this.energy = this.maxEnergy;
+    }
+    this.healTimer -= 1;
+    if (this.healTimer <= 0 && this.energy >= 1) {
+      // find most damaged neighbor inside range
+      let best = null, bestRatio = 1;
+      for (const b of game.buildings) {
+        if (b.dead || b === this) continue;
+        if (b.hp >= b.maxHp) continue;
+        if (dist(this, b) > this.repairRange) continue;
+        const r = b.hp / b.maxHp;
+        if (r < bestRatio) { best = b; bestRatio = r; }
+      }
+      if (best) {
+        best.hp = Math.min(best.maxHp, best.hp + REPAIR_AMOUNT);
+        this.energy -= 1;
+        this.lastHealed = best;
+        this.lastHealTimer = 6;
+      }
+      this.healTimer = REPAIR_TICK;
+    }
+    if (this.lastHealTimer > 0) {
+      this.lastHealTimer -= 1;
+      if (this.lastHealTimer === 0) this.lastHealed = null;
+    }
+  }
+  draw(ctx) {
+    if (this.lastHealed && this.lastHealTimer > 0) {
+      ctx.strokeStyle = `rgba(120, 255, 170, ${this.lastHealTimer / 6})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(this.lastHealed.x, this.lastHealed.y); ctx.stroke();
+    }
+    ctx.fillStyle = this.networked ? "#0e2a18" : "#08140a";
+    ctx.strokeStyle = this.networked ? "#78ffaa" : "#3a8260";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // cross mark
+    ctx.strokeStyle = this.networked ? "#78ffaa" : "#3a8260";
+    ctx.beginPath();
+    ctx.moveTo(this.x - 4, this.y); ctx.lineTo(this.x + 4, this.y);
+    ctx.moveTo(this.x, this.y - 4); ctx.lineTo(this.x, this.y + 4);
+    ctx.stroke();
+    if (this.construction < this.constructionTarget) drawConstructionBar(ctx, this);
+  }
+}
+
 // Ship base (enemy). Each shipKind tunes stats and visual.
 // Stats interpreted from ship1..ship6 in /tmp/v83_deob/scripts/__Packages/.
 const SHIP_STATS = {
@@ -833,7 +987,10 @@ class Game {
     for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
       btn.addEventListener("click", () => { this.speed = parseFloat(btn.dataset.speed); this.refreshSpeedUI(); });
     }
-    document.getElementById("restart").addEventListener("click", () => this.reset());
+    document.getElementById("restart").addEventListener("click", () => this.reset(this.level ? this.level.id : 1));
+    for (const btn of document.querySelectorAll("#missions button[data-level]")) {
+      btn.addEventListener("click", () => this.reset(parseInt(btn.dataset.level, 10)));
+    }
     const mute = document.getElementById("mute");
     if (mute) mute.addEventListener("click", () => {
       Sfx.setEnabled(!Sfx.enabled);
@@ -887,22 +1044,25 @@ class Game {
     return s;
   }
 
-  reset() {
+  reset(levelId = 1) {
+    this.level = LEVELS.find(l => l.id === levelId) || LEVELS[0];
     nextId = 1;
     this.buildings = [];
-    this.asteroids = this.spawnAsteroidField();
+    this.asteroids = this.genAsteroidField(this.level);
     this.ships = [];
     this.rockets = [];
     this.particles = [];
-    this.minerals = 1000;
+    this.minerals = this.level.minerals;
     this.totalMined = 0;
-    this.goal = 1500;
+    this.goal = this.level.goal;
     this.time = 0;
     this.tickCount = 0;
     this.speed = 1;
     this.over = null;
     this.waveNumber = 0;
-    this.nextWaveAt = 60;            // first wave at 60s sim time
+    this.waveList = this.buildWaveList(this.level);
+    this.nextWaveTickIndex = 0;
+    this.nextWaveAt = this.waveList[0] ? this.waveList[0].delay : 60;
     this.selected = null;
     this.camera.x = 0; this.camera.y = 0; this.camera.scale = 1; this.camera.targetScale = 1;
     const eg = new EnergyGen(0, 0);
@@ -914,33 +1074,92 @@ class Game {
     this.refreshBuildUI();
     this.refreshSpeedUI();
     this.refreshHud();
+    this.refreshLevelLabel();
   }
 
-  // Wave composition mirrors the source's waveBar messages: fighters first,
-  // missiles by wave 2, exploders by 3, ring ships by 4, swarmers by 5,
-  // motherships from wave 7.
-  spawnWave() {
-    this.waveNumber += 1;
-    const w = this.waveNumber;
-    const waveScale = 1 + (w - 1) * 0.15;
-    const counts = {
-      fighter:  3 + w,
-      missile:  w >= 2 ? 1 + Math.floor((w - 1) / 2) : 0,
-      exploder: w >= 3 ? 1 + Math.floor((w - 3) / 3) : 0,
-      ring:     w >= 4 ? Math.floor((w - 2) / 2) : 0,
-      swarmer:  w >= 5 ? 2 + Math.floor((w - 5) / 2) : 0,
-      mother:   w >= 7 && (w - 7) % 3 === 0 ? 1 : 0,
-    };
-    for (const [kind, count] of Object.entries(counts)) {
-      for (let i = 0; i < count; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const r = 600;
-        const sx = Math.cos(a) * r;
-        const sy = Math.sin(a) * r;
-        this.ships.push(new Ship(sx, sy, kind, waveScale));
-      }
+  // Ported from asteroidField.genAsteroids(): a rotated ellipse where X is
+  // squashed to 30% of Y, so the field forms a long band across the map.
+  genAsteroidField(level) {
+    const out = [];
+    const fieldRot = Math.random() * Math.PI;
+    for (let i = 0; i < level.asteroids; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const ax = Math.cos(a) * (50 + Math.random() * level.fieldScale * 2.5) * 0.3;
+      const ay = Math.sin(a) * (50 + Math.random() * level.fieldScale * 2.5);
+      const cx = ax * Math.cos(fieldRot) - ay * Math.sin(fieldRot);
+      const cy = ax * Math.sin(fieldRot) + ay * Math.cos(fieldRot);
+      const size = 1 + Math.floor(Math.random() * 21);
+      const energy = (5 + size) * 52;     // source formula
+      out.push(new Asteroid(snap(cx), snap(cy), energy));
     }
-    this.nextWaveAt = this.time + 45 + w * 6;
+    return out;
+  }
+
+  // Wave generator ports the Easy/Normal/Hard formulas from levels.as.
+  // Each wave = { delay (ticks from sim start), kind, count, hp, damage, angle }.
+  buildWaveList(level) {
+    const list = [];
+    let w = 1, slot = 1;
+    let acc = 0;
+    while (w < 100) {
+      let count = w * (level.id === 3 ? (level.countMul || 8) : 5) + (level.countOffset || 0);
+      if (level.id === 3) count = w * 8 + 7;
+      else count = w * (level.id === 2 ? 6 : 5);
+      if (count > level.countCap) count = level.countCap;
+      const damage = Math.min(6, Math.floor(0.8 + w / level.damageDiv));
+      let hp = w * level.hpBase;
+      // per-subType modifiers
+      if (slot === 2) { count = count / 1.5; hp = hp * 2; }
+      if (slot === 3) { count = count / 2;   hp = hp * 2; }
+      if (slot === 4) { count = count / 2;   hp = hp / 2; }
+      if (slot === 5) {
+        if (level.id === 3) count /= 1.8;
+        else if (level.id === 2) count /= 2;
+        else count /= 3;
+        hp = 20;
+      }
+      if (slot === 6) {
+        if (level.id === 3) { count = 8; hp = 360; }
+        else if (level.id === 2) { count = 5; hp = 180; }
+        else { count = 3; hp = 90; }
+      }
+      const delay = w * level.waveDelayMult + 10;
+      acc += delay;
+      list.push({
+        delay: acc / TPS,           // convert source ticks to sim seconds
+        kind: SHIP_KIND_BY_SUBTYPE[slot] || "fighter",
+        count: Math.max(1, Math.floor(count)),
+        hp,
+        damage,
+        angle: Math.random() * Math.PI * 2,
+      });
+      slot += 1;
+      if (slot > 6) { slot = 1; w += 1; }
+    }
+    return list;
+  }
+
+  // Pop the next wave-list entry, spawn its ships at the level's spawn radius.
+  spawnWave() {
+    if (this.nextWaveTickIndex >= this.waveList.length) return;
+    const entry = this.waveList[this.nextWaveTickIndex];
+    this.waveNumber += 1;
+    const spawnR = this.level.fieldScale + 200;
+    for (let i = 0; i < entry.count; i++) {
+      const a = entry.angle + (i - entry.count / 2) * 0.06;
+      const sx = Math.cos(a) * spawnR;
+      const sy = Math.sin(a) * spawnR;
+      const s = new Ship(sx, sy, entry.kind);
+      // override HP and damage from the wave entry (source formula values)
+      s.maxHp = entry.hp;
+      s.hp = entry.hp;
+      s.attackDamage = entry.damage;
+      this.ships.push(s);
+    }
+    this.nextWaveTickIndex += 1;
+    this.nextWaveAt = this.waveList[this.nextWaveTickIndex]
+      ? this.waveList[this.nextWaveTickIndex].delay
+      : Infinity;
     Sfx.play("wave");
   }
 
@@ -1012,7 +1231,7 @@ class Game {
     if (e.key === "Escape") { this.placement = null; this.refreshBuildUI(); return; }
     if (e.key === " ") { e.preventDefault(); this.speed = this.speed === 0 ? 1 : 0; this.refreshSpeedUI(); return; }
     // build shortcuts mirror the AS2 frame_1 listener: 1=relay 2=miner 3=energy 6=laser 7=rocket
-    const buildMap = { "1": "relay", "2": "miner", "3": "energy", "6": "laser", "7": "rocket" };
+    const buildMap = { "1": "relay", "2": "miner", "3": "energy", "4": "store", "5": "repair", "6": "laser", "7": "rocket" };
     if (buildMap[k]) {
       this.placement = (this.placement === buildMap[k]) ? null : buildMap[k];
       this.refreshBuildUI();
@@ -1059,6 +1278,8 @@ class Game {
     else if (type === "energy") b = new EnergyGen(x, y);
     else if (type === "laser")  b = new LaserTurret(x, y);
     else if (type === "rocket") b = new RocketTurret(x, y);
+    else if (type === "store")  b = new Store(x, y);
+    else if (type === "repair") b = new Repair(x, y);
     else return;
     this.minerals -= cost;
     this.buildings.push(b);
@@ -1103,11 +1324,15 @@ class Game {
     }
   }
 
-  // BFS from every constructed energy producer; assign each consumer a
-  // sorted list of `mines` = {depth, path, mine} ordered shallowest-first.
+  // BFS from every constructed energy producer (energy gens AND filled stores);
+  // assign each consumer a sorted list of `mines` ordered shallowest-first.
   path() {
     for (const b of this.buildings) { b.mines = []; b.minDepth = 99; }
-    const producers = this.buildings.filter(b => !b.dead && b.type === "energy" && b.construction >= b.constructionTarget);
+    // Energy gens AND stores serve as producers; stores fall back to producing
+    // from their buffer (requestEnergy checks `src.energy > 0` per drain).
+    const producers = this.buildings.filter(b => !b.dead
+      && (b.type === "energy" || b.type === "store")
+      && b.construction >= b.constructionTarget);
     for (const source of producers) {
       const q = [{ node: source, depth: 0, path: [] }];
       const seen = new Set([source.id]);
@@ -1335,6 +1560,9 @@ class Game {
     } else if (this.placement === "rocket") {
       ctx.strokeStyle = "rgba(240, 160, 96, 0.4)";
       ctx.beginPath(); ctx.arc(x, y, ROCKET_RANGE, 0, Math.PI * 2); ctx.stroke();
+    } else if (this.placement === "repair") {
+      ctx.strokeStyle = "rgba(120, 255, 170, 0.4)";
+      ctx.beginPath(); ctx.arc(x, y, REPAIR_RANGE, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.setLineDash([]);
   }
@@ -1373,6 +1601,12 @@ class Game {
       btn.classList.toggle("active", parseFloat(btn.dataset.speed) === this.speed);
     }
   }
+  refreshLevelLabel() {
+    const ml = document.getElementById("mission-label");
+    if (ml && this.level) ml.textContent = this.level.name;
+    const me = document.getElementById("mission");
+    if (me && this.level) me.textContent = this.level.id;
+  }
   refreshSelectionPanel() {
     const panel = document.getElementById("selection");
     if (!panel) return;
@@ -1384,6 +1618,8 @@ class Game {
       : b.type === "relay" ? "Relay"
       : b.type === "laser" ? "Laser Turret"
       : b.type === "rocket" ? "Rocket Turret"
+      : b.type === "store" ? "Store"
+      : b.type === "repair" ? "Repair Bay"
       : b.type;
     const stats = [];
     stats.push(`HP ${Math.ceil(b.hp)}/${Math.ceil(b.maxHp)}`);
@@ -1392,6 +1628,8 @@ class Game {
     if (b.type === "energy") stats.push(`Output ${(3 * b.efficiency).toFixed(2)}/tick · cap ${b.maxEnergy}`);
     if (b.type === "laser") stats.push(`Dmg ${b.attackDamage.toFixed(0)} · range ${b.fireRange}`);
     if (b.type === "rocket") stats.push(`Dmg ${b.attackDamage.toFixed(0)} · ×${b.rockets} per burst`);
+    if (b.type === "store") stats.push(`Buffer ${b.energy.toFixed(0)}/${b.maxEnergy}`);
+    if (b.type === "repair") stats.push(`Range ${b.repairRange} · +${REPAIR_AMOUNT} HP per pulse`);
     panel.querySelector("#sel-name").textContent = name;
     panel.querySelector("#sel-stats").textContent = stats.join(" · ");
     const btn = panel.querySelector("#sel-upgrade");

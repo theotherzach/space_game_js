@@ -41,24 +41,28 @@ Lives here so it survives context resets.
 - Web Audio SFX for shoot, hit, death, build, sell, mining, built, wave,
   win, lose.
 
-## Remaining port work (in order)
+## Remaining port work (in rough priority)
 
-1. **Laser turret + Rocket turret.** `buildingLaser.as` and
-   `buildingRocket.as`. Rocket has splash, fire rate 1 per ~unknown,
-   damage 450, splash radius 40. Laser has continuous beam mechanic.
-2. **Six enemy ship types** from `ship1.as` … `ship6.as`:
-   fighters / missile ships / exploders / ring ships / swarmers /
-   mother ships. Each has its own AI in source.
-3. **`buildingStore`** (storage) and **`buildingRepair`** (repairs
-   damaged adjacent buildings).
-4. **Per-building Upgrade UI.** Each placed building has `_upgrades`
-   remaining and an `upgrade()` method that bumps level (1→2→3), HP,
-   damage, etc. Source pattern is: click building → side panel shows
-   upgrade button → click to spend minerals → costs scale per type.
-5. **Real `levels.as` mission data.** Source has 12+ missions starting
-   with two tutorials (mining basics, defense basics). Each mission
-   sets which buildings are buildable, places starter buildings via
-   `autoPlace`, and lays out asteroid fields at scripted positions.
+The core port is shipped. Everything below is polish or non-core
+content from the source that wasn't worth a session of mine yet.
+
+1. **Tutorial levels (1 and 2)** with `mcTutorial` overlays from
+   source. Both gate building types and auto-place starter buildings
+   to teach mining + defense step-by-step.
+2. **Higher-numbered levels (6, 8, 9, 10, 11, 12, 13, 101…)** —
+   source has 12+ scripted missions beyond Easy/Normal/Hard.
+3. **Laser sub-upgrades** `pulse` and `plasma`. Source forks the
+   laser upgrade tree: pressing P or T at L1 picks pulse-laser (rapid
+   fire, fewer ticks/round) or plasma-laser (charge-up beam, huge
+   damage on release). Currently we just port the standard line.
+4. **Repair drones**. Source has actual flying drones (`_repairBots`)
+   that travel out from the repair bay. We're rendering an
+   instant beam instead.
+5. **Mother ship subship (`ship7`)** spawned by ship6. The current
+   port has mother spawn `swarmer` instead.
+6. **Minimap** (`mcMinimap`) and **wave bar messages** showing what's
+   in the upcoming wave.
+7. **Save / persistent unlock** across page reload.
 
 ## Decompile workflow
 
