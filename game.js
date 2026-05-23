@@ -1025,11 +1025,21 @@ function drawFlashOverlay(ctx, e) {
 
 function drawConstructionBar(ctx, b) {
   const w = (b.size || 8) * 2;
-  ctx.fillStyle = "rgba(0,0,0,0.6)";
-  ctx.fillRect(b.x - w / 2, b.y + (b.size || 8) + 3, w, 3);
+  // Dashed yellow ring around the perimeter so it's obvious at a glance
+  // that this building isn't operational yet.
+  const r = (b.size || 8) + 3;
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = "rgba(240, 193, 75, 0.85)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+  // Progress bar underneath
+  ctx.fillStyle = "rgba(0,0,0,0.7)";
+  ctx.fillRect(b.x - w / 2, b.y + (b.size || 8) + 5, w, 4);
   const t = b.constructionTarget > 0 ? b.construction / b.constructionTarget : 0;
-  ctx.fillStyle = "#6fd1ff";
-  ctx.fillRect(b.x - w / 2, b.y + (b.size || 8) + 3, w * t, 3);
+  ctx.fillStyle = "#f0c14b";
+  ctx.fillRect(b.x - w / 2, b.y + (b.size || 8) + 5, w * t, 4);
 }
 function drawHpBar(ctx, e, w) {
   if (e.hp >= e.maxHp) return;
@@ -1855,15 +1865,26 @@ class Game {
       if (t === "cancel" || t === "sell") continue;
       btn.classList.toggle("disabled", this.minerals < (COSTS[t] || Infinity));
     }
+    // keep the "X buildings under construction" hint fresh
+    if (!this.placement) this.refreshBuildUI();
   }
   refreshBuildUI() {
     for (const btn of document.querySelectorAll("#build button[data-build]")) {
       btn.classList.toggle("active", btn.dataset.build === this.placement);
     }
     const hint = document.getElementById("hint");
-    if (hint) hint.textContent = this.placement
-      ? `Placing ${this.placement} — click on the map. Right-click drag to pan, wheel to zoom.`
-      : `Click a building or press 1/2/3/6/7. Right-click drag to pan, wheel zooms.`;
+    if (!hint) return;
+    if (this.placement) {
+      hint.textContent = `Placing ${this.placement} — click on the map. Right-click drag to pan, wheel zooms.`;
+      return;
+    }
+    // Surface the most common "why isn't this working" cases in the hint
+    const unfinished = this.buildings.filter(b => b.construction < b.constructionTarget).length;
+    if (unfinished > 0) {
+      hint.textContent = `${unfinished} building(s) under construction (dashed yellow ring). Build more energy generators (3) to speed it up.`;
+    } else {
+      hint.textContent = `Click a building or press 1/2/3/4/5/6/7. ',./p' = pause/slow/normal/fast. R sells under cursor.`;
+    }
   }
   refreshSpeedUI() {
     for (const btn of document.querySelectorAll("#speeds button[data-speed]")) {
