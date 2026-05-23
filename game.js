@@ -1249,6 +1249,19 @@ class Game {
       return;
     }
     if (e.button !== 0) return;
+    // click on minimap → jump camera to that world position
+    const mw = 180, mh = 120;
+    const mxOrig = W - mw - 10, myOrig = H - mh - 10;
+    if (this.mouse.sx >= mxOrig && this.mouse.sx <= mxOrig + mw
+      && this.mouse.sy >= myOrig && this.mouse.sy <= myOrig + mh) {
+      const fieldScale = this.level?.fieldScale || 600;
+      const worldHalfWidth = fieldScale * 1.1;
+      const worldHalfHeight = fieldScale * 2.5 * 1.1;
+      const scale = Math.min(mw / (worldHalfWidth * 2), mh / (worldHalfHeight * 2));
+      this.camera.x = (this.mouse.sx - (mxOrig + mw / 2)) / scale;
+      this.camera.y = (this.mouse.sy - (myOrig + mh / 2)) / scale;
+      return;
+    }
     // placement mode = build attempt
     if (this.placement) {
       const w = this.mouse;
@@ -1611,6 +1624,59 @@ class Game {
       ctx.textAlign = "center";
       ctx.fillText(this.over === "win" ? "MISSION COMPLETE" : "BASE DESTROYED", W / 2, H / 2);
     }
+
+    this.drawMinimap(ctx);
+  }
+
+  // Minimap in the bottom-right showing the asteroid field, buildings, and
+  // ships at a fixed world scale. Mirrors the source's `mcMinimap`.
+  drawMinimap(ctx) {
+    const mw = 180, mh = 120;
+    const mx = W - mw - 10, my = H - mh - 10;
+    // Choose a scale that fits the asteroid field plus some margin
+    const fieldScale = this.level?.fieldScale || 600;
+    const worldHalfWidth = fieldScale * 1.1;
+    const worldHalfHeight = fieldScale * 2.5 * 1.1;
+    const scale = Math.min(mw / (worldHalfWidth * 2), mh / (worldHalfHeight * 2));
+    // background
+    ctx.fillStyle = "rgba(2, 3, 10, 0.85)";
+    ctx.strokeStyle = "rgba(111, 209, 255, 0.4)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(mx, my, mw, mh);
+    ctx.strokeRect(mx, my, mw, mh);
+    const toMini = (x, y) => ({ x: mx + mw / 2 + x * scale, y: my + mh / 2 + y * scale });
+    // asteroids
+    for (const a of this.asteroids) {
+      const p = toMini(a.x, a.y);
+      ctx.fillStyle = "rgba(140, 220, 110, 0.85)";
+      ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+    // buildings
+    for (const b of this.buildings) {
+      const p = toMini(b.x, b.y);
+      const color = b.type === "energy" ? "#a8e060"
+        : b.type === "miner" ? "#f0c14b"
+        : b.type === "laser" ? "#7eff00"
+        : b.type === "rocket" ? "#f0a060"
+        : b.type === "store" ? "#a0bcff"
+        : b.type === "repair" ? "#78ffaa"
+        : "#6fd1ff";
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+    // ships
+    for (const s of this.ships) {
+      const p = toMini(s.x, s.y);
+      ctx.fillStyle = "#ff4040";
+      ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+    // viewport rect
+    const half = { x: (W / 2) / this.camera.scale, y: (H / 2) / this.camera.scale };
+    const vp1 = toMini(this.camera.x - half.x, this.camera.y - half.y);
+    const vp2 = toMini(this.camera.x + half.x, this.camera.y + half.y);
+    ctx.strokeStyle = "rgba(111, 209, 255, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(vp1.x, vp1.y, vp2.x - vp1.x, vp2.y - vp1.y);
   }
 
   drawPlacementPreview(ctx) {
